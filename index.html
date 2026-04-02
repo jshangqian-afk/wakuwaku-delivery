@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>わくわく広場 納品書・出荷管理</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Meiryo', sans-serif; background: #f5f5f5; color: #333; }
+.screen { display: none; min-height: 100vh; padding: 16px; max-width: 800px; margin: 0 auto; }
+.screen.active { display: block; }
+header { background: #ff6b35; color: #fff; padding: 16px; text-align: center; font-size: 20px; font-weight: bold; position: sticky; top: 0; z-index: 100; }
+h2 { font-size: 22px; margin: 20px 0 16px; color: #333; }
+h3 { font-size: 18px; margin: 16px 0 10px; color: #555; }
+
+/* Buttons */
+.btn { display: inline-block; padding: 16px 32px; font-size: 18px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; text-align: center; transition: opacity 0.2s; }
+.btn:active { opacity: 0.7; }
+.btn-primary { background: #ff6b35; color: #fff; }
+.btn-secondary { background: #4a90d9; color: #fff; }
+.btn-success { background: #27ae60; color: #fff; }
+.btn-danger { background: #e74c3c; color: #fff; }
+.btn-outline { background: #fff; color: #ff6b35; border: 2px solid #ff6b35; }
+.btn-sm { padding: 10px 18px; font-size: 15px; }
+.btn-block { display: block; width: 100%; }
+.btn-back { background: #888; color: #fff; margin-bottom: 16px; }
+
+/* Home */
+.home-buttons { display: flex; flex-direction: column; gap: 20px; margin-top: 40px; }
+.home-buttons .btn { padding: 28px; font-size: 22px; border-radius: 12px; }
+
+/* Form */
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; font-size: 16px; font-weight: bold; margin-bottom: 6px; }
+.form-group select, .form-group input { width: 100%; padding: 14px; font-size: 17px; border: 2px solid #ccc; border-radius: 8px; background: #fff; }
+.form-group select:focus, .form-group input:focus { border-color: #ff6b35; outline: none; }
+
+/* Product input table */
+.product-table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+.product-table th { background: #ff6b35; color: #fff; padding: 12px 8px; font-size: 15px; text-align: center; }
+.product-table td { padding: 10px 8px; border-bottom: 1px solid #ddd; font-size: 16px; text-align: center; }
+.product-table td:first-child { text-align: left; }
+.product-table input[type="number"] { width: 80px; padding: 10px; font-size: 18px; text-align: center; border: 2px solid #ccc; border-radius: 6px; }
+.product-table input[type="number"]:focus { border-color: #ff6b35; outline: none; }
+
+/* Summary */
+.summary-bar { background: #fff3ee; border: 2px solid #ff6b35; border-radius: 10px; padding: 16px; margin: 16px 0; display: flex; justify-content: space-around; font-size: 20px; font-weight: bold; }
+
+/* History */
+.history-filters { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.history-filters select, .history-filters input { padding: 12px; font-size: 16px; border: 2px solid #ccc; border-radius: 8px; }
+.history-list { display: flex; flex-direction: column; gap: 10px; }
+.history-item { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+.history-item .info { flex: 1; min-width: 200px; }
+.history-item .info .date { font-size: 14px; color: #888; }
+.history-item .info .store { font-size: 18px; font-weight: bold; }
+.history-item .info .details { font-size: 14px; color: #666; margin-top: 4px; }
+.history-item .actions { display: flex; gap: 8px; }
+
+/* Master */
+.master-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.master-tab { flex: 1; padding: 14px; font-size: 17px; font-weight: bold; text-align: center; border: 2px solid #ccc; border-radius: 8px; background: #fff; cursor: pointer; }
+.master-tab.active { background: #ff6b35; color: #fff; border-color: #ff6b35; }
+.master-list { display: flex; flex-direction: column; gap: 8px; }
+.master-item { background: #fff; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.master-item .info { flex: 1; }
+.master-item .info .name { font-size: 17px; font-weight: bold; }
+.master-item .info .sub { font-size: 13px; color: #888; margin-top: 2px; }
+.master-item .actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* Modal */
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 200; justify-content: center; align-items: center; }
+.modal-overlay.active { display: flex; }
+.modal { background: #fff; border-radius: 12px; padding: 24px; width: 90%; max-width: 500px; max-height: 90vh; overflow-y: auto; }
+.modal h3 { margin-top: 0; }
+.modal .form-group { margin-bottom: 12px; }
+.modal-actions { display: flex; gap: 10px; margin-top: 16px; }
+.modal-actions .btn { flex: 1; }
+
+/* PDF preview (hidden) */
+#pdf-container { position: fixed; left: 0; top: 0; z-index: -1; opacity: 0; pointer-events: none; }
+.pdf-page { width: 794px; height: 1123px; background: #fff; padding: 0; font-family: 'Yu Mincho', 'Hiragino Mincho ProN', serif; position: relative; }
+.slip { height: 540px; padding: 30px 40px 20px; position: relative; border-bottom: 1px dashed #999; }
+.slip-copy { border-bottom: none; }
+.slip-title { text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 1em; margin-bottom: 8px; }
+.slip-copy-label { text-align: center; font-size: 14px; margin-bottom: 4px; }
+.slip-date { text-align: right; font-size: 14px; margin-bottom: 12px; }
+.slip-to { font-size: 18px; margin-bottom: 4px; }
+.slip-to-line { border-bottom: 1px solid #333; display: inline-block; min-width: 280px; padding-bottom: 2px; }
+.slip-from { text-align: right; font-size: 12px; line-height: 1.6; margin-bottom: 10px; }
+.slip-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
+.slip-table th, .slip-table td { border: 1px solid #333; padding: 4px 8px; }
+.slip-table th { background: #f0f0f0; font-weight: bold; text-align: center; }
+.slip-table td { text-align: right; }
+.slip-table td:first-child { text-align: left; }
+.slip-total { font-weight: bold; background: #f9f9f9; }
+.slip-stamps { display: flex; justify-content: flex-end; gap: 0; margin: 8px 0; }
+.slip-stamp-box { width: 60px; height: 50px; border: 1px solid #333; text-align: center; font-size: 11px; line-height: 18px; }
+.slip-note { font-size: 11px; color: #555; margin-top: 4px; }
+
+.empty-message { text-align: center; color: #999; padding: 40px; font-size: 16px; }
+
+/* Toast */
+.toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #333; color: #fff; padding: 14px 28px; border-radius: 8px; font-size: 16px; z-index: 300; display: none; }
+.toast.show { display: block; animation: fadeInOut 2.5s; }
+@keyframes fadeInOut { 0% { opacity: 0; } 10% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<header>わくわく広場 納品書・出荷管理</header>
+
+<!-- ホーム画面 -->
+<div id="screen-home" class="screen active">
+  <div class="home-buttons">
+    <button class="btn btn-primary btn-block" onclick="showScreen('create')">納品書を作成</button>
+    <button class="btn btn-secondary btn-block" onclick="showScreen('history')">履歴を見る</button>
+    <button class="btn btn-outline btn-block" onclick="showScreen('master')">マスター管理</button>
+  </div>
+</div>
+
+<!-- 納品書作成画面 -->
+<div id="screen-create" class="screen">
+  <button class="btn btn-back btn-sm" onclick="showScreen('home')">← ホームに戻る</button>
+  <h2>納品書作成</h2>
+  <div class="form-group">
+    <label>店舗選択</label>
+    <select id="create-store"></select>
+  </div>
+  <div class="form-group">
+    <label>納品日</label>
+    <input type="date" id="create-date">
+  </div>
+  <h3>商品・数量入力</h3>
+  <table class="product-table">
+    <thead><tr><th>品名</th><th>単価</th><th>数量</th></tr></thead>
+    <tbody id="create-products"></tbody>
+  </table>
+  <div class="summary-bar">
+    <span>合計数量: <span id="total-qty">0</span></span>
+    <span>合計金額: &yen;<span id="total-amount">0</span></span>
+  </div>
+  <button class="btn btn-success btn-block" onclick="generatePDF().catch(e => console.error('generatePDF error:', e))" style="margin-top:12px;">PDFを生成・印刷</button>
+</div>
+
+<!-- 履歴画面 -->
+<div id="screen-history" class="screen">
+  <button class="btn btn-back btn-sm" onclick="showScreen('home')">← ホームに戻る</button>
+  <h2>納品履歴</h2>
+  <div class="history-filters">
+    <input type="month" id="history-month" onchange="renderHistory()">
+    <select id="history-store" onchange="renderHistory()"><option value="">全店舗</option></select>
+  </div>
+  <div id="history-list" class="history-list"></div>
+</div>
+
+<!-- マスター管理画面 -->
+<div id="screen-master" class="screen">
+  <button class="btn btn-back btn-sm" onclick="showScreen('home')">← ホームに戻る</button>
+  <h2>マスター管理</h2>
+  <div class="master-tabs">
+    <div class="master-tab active" onclick="switchMasterTab('store')">店舗マスター</div>
+    <div class="master-tab" onclick="switchMasterTab('product')">商品マスター</div>
+  </div>
+  <div id="master-store-section">
+    <button class="btn btn-primary btn-sm" onclick="openStoreModal()" style="margin-bottom:12px;">+ 店舗を追加</button>
+    <div id="master-store-list" class="master-list"></div>
+  </div>
+  <div id="master-product-section" style="display:none;">
+    <button class="btn btn-primary btn-sm" onclick="openProductModal()" style="margin-bottom:12px;">+ 商品を追加</button>
+    <div id="master-product-list" class="master-list"></div>
+  </div>
+</div>
+
+<!-- 店舗モーダル -->
+<div id="store-modal" class="modal-overlay">
+  <div class="modal">
+    <h3 id="store-modal-title">店舗を追加</h3>
+    <input type="hidden" id="store-edit-id">
+    <div class="form-group"><label>店舗名</label><input type="text" id="store-name"></div>
+    <div class="form-group"><label>郵便番号</label><input type="text" id="store-zip" placeholder="000-0000"></div>
+    <div class="form-group"><label>住所</label><input type="text" id="store-address"></div>
+    <div class="form-group"><label>電話番号</label><input type="text" id="store-phone"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('store-modal')">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveStore()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 商品モーダル -->
+<div id="product-modal" class="modal-overlay">
+  <div class="modal">
+    <h3 id="product-modal-title">商品を追加</h3>
+    <input type="hidden" id="product-edit-id">
+    <div class="form-group"><label>商品名</label><input type="text" id="product-name"></div>
+    <div class="form-group"><label>単価（税抜）</label><input type="number" id="product-price" min="0"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal('product-modal')">キャンセル</button>
+      <button class="btn btn-primary" onclick="saveProduct()">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- PDF生成用（非表示） -->
+<div id="pdf-container"></div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<script>
+// === GAS連携URL（後から差し替え） ===
+const GAS_URL = "https://script.google.com/macros/s/AKfycbx057PxsJL74BsNXhzhJEGxgxEqnsVcB486xKvp195awzSE6499VKQMP7mB-p6BTiPN/exec";
+
+// === データ管理 ===
+const DEFAULT_STORES = [
+  { id: "s001", name: "糀谷", address: "東京都大田区萩中2-8-14 レガーロ・ノンノ1階", zip: "144-0047", phone: "090-2002-6571" },
+  { id: "s002", name: "アピタ四日市", address: "三重県四日市市安島１丁目3-31", zip: "515-0075", phone: "070-2247-5443" },
+  { id: "s003", name: "ららぽーと名古屋みなとアクルス", address: "愛知県名古屋市港区港明2-3-2", zip: "455-8501", phone: "080-5557-7800" },
+  { id: "s004", name: "セントラルパーク", address: "愛知県名古屋市中区錦3-15-13先 セントラルパーク地下1階", zip: "460-0003", phone: "080-6147-1927" },
+  { id: "s005", name: "ファッションクルーズひたちなか", address: "茨城県ひたちなか市新光町35", zip: "312-0005", phone: "080-6392-4625" },
+  { id: "s006", name: "イオンモール羽生", address: "埼玉県羽生市川崎2-281-3", zip: "348-0039", phone: "070-2238-5392" },
+  { id: "s007", name: "アピタ千代田橋", address: "愛知県名古屋市千種区千代田橋2丁目1番1号 1階", zip: "464-0011", phone: "090-7589-5683" },
+  { id: "s008", name: "サンシャインシティアルパ", address: "東京都豊島区東池袋3丁目1-1 サンシャインシティ専門店街アルパ1F", zip: "170-0013", phone: "080-6432-5261" },
+  { id: "s009", name: "アピタ木曾川", address: "愛知県一宮市木曾川町黒田八ノ通51番地4 1階", zip: "493-0001", phone: "080-6698-1669" },
+  { id: "s010", name: "イオンタウン鈴鹿", address: "三重県鈴鹿市庄野羽山4丁目20-1 1F", zip: "513-0834", phone: "090-3888-8143" },
+  { id: "s011", name: "セブンパークアリオ柏", address: "千葉県柏市大島田1丁目6番地1 1階", zip: "277-0922", phone: "070-6651-1438" },
+  { id: "s012", name: "アピタ松阪三雲", address: "三重県松阪市市場庄町1266-1", zip: "515-2121", phone: "090-8168-0847" },
+  { id: "s013", name: "野方", address: "東京都中野区野方6丁目13-5 木村ビル1階", zip: "165-0027", phone: "080-6698-0962" },
+  { id: "s014", name: "荏原中延", address: "東京都品川区東中延2丁目1-16 MST1階", zip: "142-0052", phone: "080-6698-0961" },
+  { id: "s015", name: "中日ビル", address: "愛知県名古屋市中区栄4丁目1-1", zip: "460-0008", phone: "080-5759-6270" },
+  { id: "s016", name: "イオンタウン名西", address: "愛知県名古屋市西区香吞町6丁目49番地1", zip: "451-0015", phone: "080-9877-6012" },
+  { id: "s017", name: "立花", address: "東京都墨田区立花2丁目26-3 立平ビル1階", zip: "131-0043", phone: "080-6698-0960" },
+  { id: "s018", name: "新中野", address: "東京都中野区中央5丁目14-1", zip: "164-0011", phone: "070-2273-1421" },
+  { id: "s019", name: "日本橋浜町", address: "東京都中央区日本橋浜町3丁目20-11 ニューハウス浜町1階", zip: "103-0007", phone: "070-2247-5444" },
+  { id: "s020", name: "ららテラス北綾瀬", address: "東京都足立区谷中4-8-1 1F", zip: "120-0006", phone: "070-2376-7292" },
+  { id: "s021", name: "イオンタウン四日市泊", address: "三重県四日市市泊小柳町4-5", zip: "510-0883", phone: "090-3802-9340" },
+  { id: "s022", name: "渋谷本町", address: "東京都渋谷区本町3-41-11 岩崎ビル1階", zip: "151-0071", phone: "080-9010-5337" },
+  { id: "s023", name: "祖師ヶ谷大蔵", address: "東京都世田谷区祖師谷1丁目9-10 ルピナスビル1階", zip: "157-0072", phone: "090-3896-0983" },
+  { id: "s024", name: "国領", address: "東京都調布市国領町4丁目35-2 マンション国領B16", zip: "182-0022", phone: "070-7662-1364" },
+  { id: "s025", name: "横浜元町", address: "神奈川県横浜市中区石川町1丁目3-1 石川町GSビル", zip: "231-0868", phone: "090-3802-9274" },
+  { id: "s026", name: "イオンモール木曾川", address: "愛知県一宮市木曾川町黒田字南八ヶ池25-1", zip: "493-0001", phone: "070-5028-0795" },
+  { id: "s027", name: "伊勢佐木町", address: "神奈川県横浜市中区伊勢佐木町6丁目132-2 グロワール伊勢佐木1階", zip: "231-0045", phone: "070-2273-1289" },
+  { id: "s028", name: "中野南台", address: "東京都中野区南台2-29-3 都営南台2丁目アパート101", zip: "164-0014", phone: "090-6281-5288" },
+  { id: "s029", name: "武蔵新城", address: "神奈川県川崎市中原区新城1丁目11-2 日光ビル1階", zip: "211-0044", phone: "080-5855-7910" },
+  { id: "s030", name: "イオンモール浜松志都呂", address: "静岡県浜松市中央区志都呂2丁目37番1号", zip: "432-8069", phone: "090-6280-7821" },
+  { id: "s031", name: "麻布十番", address: "東京都港区麻布十番2-11-5 アクシアフォレスタ麻布102号室", zip: "106-0045", phone: "080-6911-7838" },
+  { id: "s032", name: "イオンモール高崎", address: "群馬県高崎市棟高町1400 1階", zip: "", phone: "080-5940-1117" }
+];
+
+const DEFAULT_PRODUCTS = [
+  { id: "p001", name: "あいかのキムチ210g", price: 430 },
+  { id: "p002", name: "匠220g", price: 600 },
+  { id: "p003", name: "匠大辛220g", price: 600 },
+  { id: "p004", name: "匠一本漬け", price: 710 },
+  { id: "p005", name: "匠大辛一本漬け", price: 710 }
+];
+
+function loadData(key) {
+  const d = localStorage.getItem(key);
+  return d ? JSON.parse(d) : null;
+}
+function saveData(key, data) {
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
+// 初回起動時のみ初期データ投入
+function initData() {
+  if (!loadData('stores')) saveData('stores', DEFAULT_STORES);
+  if (!loadData('products')) saveData('products', DEFAULT_PRODUCTS);
+  if (!loadData('deliveries')) saveData('deliveries', []);
+}
+
+function getStores() { return loadData('stores') || []; }
+function getProducts() { return loadData('products') || []; }
+function getDeliveries() { return loadData('deliveries') || []; }
+
+// === 画面遷移 ===
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById('screen-' + name).classList.add('active');
+  if (name === 'create') initCreateScreen();
+  if (name === 'history') initHistoryScreen();
+  if (name === 'master') renderMaster();
+}
+
+// === 和暦変換 ===
+function toWareki(dateStr) {
+  const d = new Date(dateStr);
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  const reiwaYear = y - 2018;
+  return '令和' + (reiwaYear === 1 ? '元' : reiwaYear) + '年' + m + '月' + day + '日';
+}
+
+// === 数値フォーマット ===
+function formatNum(n) {
+  return n.toLocaleString();
+}
+
+// === Toast ===
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.remove('show');
+  void t.offsetWidth;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+// === 納品書作成画面 ===
+function initCreateScreen() {
+  const stores = getStores();
+  const products = getProducts();
+  const sel = document.getElementById('create-store');
+  sel.innerHTML = '<option value="">-- 店舗を選択 --</option>' +
+    stores.map(s => '<option value="' + s.id + '">' + s.name + '</option>').join('');
+
+  const today = new Date().toISOString().split('T')[0];
+  document.getElementById('create-date').value = today;
+
+  const tbody = document.getElementById('create-products');
+  tbody.innerHTML = products.map(p =>
+    '<tr><td>' + p.name + '</td><td>&yen;' + formatNum(p.price) + '</td>' +
+    '<td><input type="number" min="0" value="0" data-id="' + p.id + '" data-price="' + p.price + '" oninput="updateTotals()"></td></tr>'
+  ).join('');
+  updateTotals();
+}
+
+function updateTotals() {
+  let totalQty = 0, totalAmount = 0;
+  document.querySelectorAll('#create-products input[type=number]').forEach(inp => {
+    const qty = parseInt(inp.value) || 0;
+    const price = parseInt(inp.dataset.price);
+    totalQty += qty;
+    totalAmount += qty * price;
+  });
+  document.getElementById('total-qty').textContent = formatNum(totalQty);
+  document.getElementById('total-amount').textContent = formatNum(totalAmount);
+}
+
+// === ライブラリ読み込みチェック ===
+function checkPDFLibraries() {
+  if (typeof html2canvas === 'undefined') {
+    console.error('html2canvas が読み込まれていません');
+    showToast('PDF生成ライブラリ(html2canvas)の読み込みに失敗しました');
+    return false;
+  }
+  if (typeof window.jspdf === 'undefined') {
+    console.error('jsPDF が読み込まれていません');
+    showToast('PDF生成ライブラリ(jsPDF)の読み込みに失敗しました');
+    return false;
+  }
+  return true;
+}
+
+// === PDF生成 ===
+async function generatePDF() {
+  if (!checkPDFLibraries()) return;
+  const storeId = document.getElementById('create-store').value;
+  const dateStr = document.getElementById('create-date').value;
+  if (!storeId) { showToast('店舗を選択してください'); return; }
+
+  const store = getStores().find(s => s.id === storeId);
+  const products = getProducts();
+  const items = [];
+  let totalQty = 0, totalAmount = 0;
+
+  document.querySelectorAll('#create-products input[type=number]').forEach(inp => {
+    const qty = parseInt(inp.value) || 0;
+    if (qty > 0) {
+      const pid = inp.dataset.id;
+      const price = parseInt(inp.dataset.price);
+      const prod = products.find(p => p.id === pid);
+      items.push({ productId: pid, productName: prod.name, price: price, qty: qty });
+      totalQty += qty;
+      totalAmount += qty * price;
+    }
+  });
+
+  if (items.length === 0) { showToast('数量を1つ以上入力してください'); return; }
+
+  // 納品データ
+  const delivery = {
+    id: 'd' + dateStr.replace(/-/g, '') + String(Date.now()).slice(-4),
+    date: dateStr,
+    storeId: store.id,
+    storeName: store.name,
+    items: items,
+    totalQty: totalQty,
+    totalAmount: totalAmount
+  };
+
+  // PDF用HTML生成
+  await renderAndDownloadPDF(store, delivery, false);
+
+  // 履歴保存
+  const deliveries = getDeliveries();
+  deliveries.unshift(delivery);
+  saveData('deliveries', deliveries);
+
+  // GAS送信（非同期・エラー無視）
+  sendToSheet(delivery, store);
+
+  showToast('PDFを生成しました');
+}
+
+async function renderAndDownloadPDF(store, delivery, isReprint) {
+  const container = document.getElementById('pdf-container');
+  const warekiDate = toWareki(delivery.date);
+
+  function buildSlipHTML(isCopy) {
+    let rows = '';
+    delivery.items.forEach(item => {
+      rows += '<tr><td>' + item.productName + '</td><td>' + item.qty + '</td><td>' + formatNum(item.price) + '</td><td>' + formatNum(item.qty * item.price) + '</td></tr>';
+    });
+    const minRows = 5;
+    for (let i = delivery.items.length; i < minRows; i++) {
+      rows += '<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>';
+    }
+    rows += '<tr class="slip-total"><td>合計</td><td>' + formatNum(delivery.totalQty) + '</td><td></td><td>' + formatNum(delivery.totalAmount) + '</td></tr>';
+
+    return '<div class="slip ' + (isCopy ? 'slip-copy' : '') + '">' +
+      (isCopy ? '<div class="slip-copy-label">（控）</div>' : '') +
+      '<div class="slip-title">納　品　書</div>' +
+      '<div class="slip-date">' + warekiDate + '</div>' +
+      '<div class="slip-to"><span class="slip-to-line">' + delivery.storeName + ' 様</span></div>' +
+      '<div class="slip-from">株式会社 フラワーファクトリーフルール<br>〒長野県上田市古里827番地3<br>TEL 0268-71-5959　FAX 0268-25-8755</div>' +
+      '<table class="slip-table"><thead><tr><th>品名</th><th>数量</th><th>単価</th><th>金額</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<div class="slip-stamps">' +
+        '<div class="slip-stamp-box">担当者<br>&nbsp;</div>' +
+        '<div class="slip-stamp-box">受領印<br>&nbsp;</div>' +
+      '</div>' +
+      '<div class="slip-note">※賞味期限2日前より商品単価から30%の値下げをお願いいたします。</div>' +
+    '</div>';
+  }
+
+  container.innerHTML = '<div class="pdf-page">' + buildSlipHTML(false) + buildSlipHTML(true) + '</div>';
+
+  try {
+    // html2canvas → jsPDF
+    const page = container.querySelector('.pdf-page');
+    console.log('html2canvas キャプチャ開始...');
+    const canvas = await html2canvas(page, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: true,
+      windowWidth: 794,
+      windowHeight: 1123
+    });
+    console.log('html2canvas キャプチャ完了:', canvas.width, 'x', canvas.height);
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const imgData = canvas.toDataURL('image/png');
+    pdf.addImage(imgData, 'PNG', 0, 0, 210, 297);
+
+    const fileName = '納品書_' + delivery.storeName + '_' + delivery.date + '.pdf';
+    pdf.save(fileName);
+    console.log('PDF保存完了:', fileName);
+  } catch (e) {
+    console.error('PDF生成エラー:', e);
+    showToast('PDF生成中にエラーが発生しました');
+  } finally {
+    container.innerHTML = '';
+  }
+}
+
+// === GAS送信 ===
+async function sendToSheet(delivery, store) {
+  if (!GAS_URL) return;
+  try {
+    await fetch(GAS_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        date: delivery.date,
+        storeName: store.name,
+        address: store.address,
+        phone: store.phone,
+        items: delivery.items
+      })
+    });
+  } catch (e) {
+    // エラー無視で続行
+  }
+}
+
+// === 履歴画面 ===
+function initHistoryScreen() {
+  const stores = getStores();
+  const sel = document.getElementById('history-store');
+  sel.innerHTML = '<option value="">全店舗</option>' +
+    stores.map(s => '<option value="' + s.id + '">' + s.name + '</option>').join('');
+
+  const now = new Date();
+  document.getElementById('history-month').value = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+  renderHistory();
+}
+
+function renderHistory() {
+  const month = document.getElementById('history-month').value;
+  const storeId = document.getElementById('history-store').value;
+  let deliveries = getDeliveries();
+
+  if (month) {
+    deliveries = deliveries.filter(d => d.date.startsWith(month));
+  }
+  if (storeId) {
+    deliveries = deliveries.filter(d => d.storeId === storeId);
+  }
+
+  const list = document.getElementById('history-list');
+  if (deliveries.length === 0) {
+    list.innerHTML = '<div class="empty-message">該当する履歴がありません</div>';
+    return;
+  }
+
+  list.innerHTML = deliveries.map(d =>
+    '<div class="history-item">' +
+      '<div class="info">' +
+        '<div class="date">' + toWareki(d.date) + '</div>' +
+        '<div class="store">' + d.storeName + '</div>' +
+        '<div class="details">数量: ' + formatNum(d.totalQty) + ' / 金額: &yen;' + formatNum(d.totalAmount) + '</div>' +
+      '</div>' +
+      '<div class="actions">' +
+        '<button class="btn btn-secondary btn-sm" onclick="reprintPDF(\'' + d.id + '\')">PDF再出力</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="deleteDelivery(\'' + d.id + '\')">削除</button>' +
+      '</div>' +
+    '</div>'
+  ).join('');
+}
+
+async function reprintPDF(deliveryId) {
+  if (!checkPDFLibraries()) return;
+  try {
+    const delivery = getDeliveries().find(d => d.id === deliveryId);
+    if (!delivery) return;
+    const store = getStores().find(s => s.id === delivery.storeId) || { name: delivery.storeName, address: '', phone: '' };
+    await renderAndDownloadPDF(store, delivery, true);
+    showToast('PDFを再出力しました');
+  } catch (e) {
+    console.error('reprintPDF error:', e);
+    showToast('PDF再出力中にエラーが発生しました');
+  }
+}
+
+function deleteDelivery(deliveryId) {
+  if (!confirm('この履歴を削除しますか？')) return;
+  const deliveries = getDeliveries().filter(d => d.id !== deliveryId);
+  saveData('deliveries', deliveries);
+  renderHistory();
+  showToast('履歴を削除しました');
+}
+
+// === マスター管理 ===
+function switchMasterTab(tab) {
+  document.querySelectorAll('.master-tab').forEach(t => t.classList.remove('active'));
+  if (tab === 'store') {
+    document.querySelectorAll('.master-tab')[0].classList.add('active');
+    document.getElementById('master-store-section').style.display = '';
+    document.getElementById('master-product-section').style.display = 'none';
+  } else {
+    document.querySelectorAll('.master-tab')[1].classList.add('active');
+    document.getElementById('master-store-section').style.display = 'none';
+    document.getElementById('master-product-section').style.display = '';
+  }
+}
+
+function renderMaster() {
+  renderStoreList();
+  renderProductList();
+}
+
+function renderStoreList() {
+  const stores = getStores();
+  const list = document.getElementById('master-store-list');
+  list.innerHTML = stores.map(s =>
+    '<div class="master-item">' +
+      '<div class="info"><div class="name">' + s.name + '</div><div class="sub">〒' + s.zip + ' ' + s.address + '<br>TEL: ' + s.phone + '</div></div>' +
+      '<div class="actions">' +
+        '<button class="btn btn-secondary btn-sm" onclick="openStoreModal(\'' + s.id + '\')">編集</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="deleteStore(\'' + s.id + '\')">削除</button>' +
+      '</div>' +
+    '</div>'
+  ).join('');
+}
+
+function renderProductList() {
+  const products = getProducts();
+  const list = document.getElementById('master-product-list');
+  list.innerHTML = products.map(p =>
+    '<div class="master-item">' +
+      '<div class="info"><div class="name">' + p.name + '</div><div class="sub">&yen;' + formatNum(p.price) + '</div></div>' +
+      '<div class="actions">' +
+        '<button class="btn btn-secondary btn-sm" onclick="openProductModal(\'' + p.id + '\')">編集</button>' +
+        '<button class="btn btn-danger btn-sm" onclick="deleteProduct(\'' + p.id + '\')">削除</button>' +
+      '</div>' +
+    '</div>'
+  ).join('');
+}
+
+// 店舗モーダル
+function openStoreModal(id) {
+  const modal = document.getElementById('store-modal');
+  if (id) {
+    const s = getStores().find(st => st.id === id);
+    document.getElementById('store-modal-title').textContent = '店舗を編集';
+    document.getElementById('store-edit-id').value = id;
+    document.getElementById('store-name').value = s.name;
+    document.getElementById('store-zip').value = s.zip;
+    document.getElementById('store-address').value = s.address;
+    document.getElementById('store-phone').value = s.phone;
+  } else {
+    document.getElementById('store-modal-title').textContent = '店舗を追加';
+    document.getElementById('store-edit-id').value = '';
+    document.getElementById('store-name').value = '';
+    document.getElementById('store-zip').value = '';
+    document.getElementById('store-address').value = '';
+    document.getElementById('store-phone').value = '';
+  }
+  modal.classList.add('active');
+}
+
+function saveStore() {
+  const id = document.getElementById('store-edit-id').value;
+  const name = document.getElementById('store-name').value.trim();
+  const zip = document.getElementById('store-zip').value.trim();
+  const address = document.getElementById('store-address').value.trim();
+  const phone = document.getElementById('store-phone').value.trim();
+  if (!name) { showToast('店舗名を入力してください'); return; }
+
+  const stores = getStores();
+  if (id) {
+    const idx = stores.findIndex(s => s.id === id);
+    stores[idx] = { id, name, zip, address, phone };
+  } else {
+    const newId = 's' + String(Date.now()).slice(-6);
+    stores.push({ id: newId, name, zip, address, phone });
+  }
+  saveData('stores', stores);
+  closeModal('store-modal');
+  renderStoreList();
+  showToast('店舗を保存しました');
+}
+
+function deleteStore(id) {
+  if (!confirm('この店舗を削除しますか？')) return;
+  const stores = getStores().filter(s => s.id !== id);
+  saveData('stores', stores);
+  renderStoreList();
+  showToast('店舗を削除しました');
+}
+
+// 商品モーダル
+function openProductModal(id) {
+  const modal = document.getElementById('product-modal');
+  if (id) {
+    const p = getProducts().find(pr => pr.id === id);
+    document.getElementById('product-modal-title').textContent = '商品を編集';
+    document.getElementById('product-edit-id').value = id;
+    document.getElementById('product-name').value = p.name;
+    document.getElementById('product-price').value = p.price;
+  } else {
+    document.getElementById('product-modal-title').textContent = '商品を追加';
+    document.getElementById('product-edit-id').value = '';
+    document.getElementById('product-name').value = '';
+    document.getElementById('product-price').value = '';
+  }
+  modal.classList.add('active');
+}
+
+function saveProduct() {
+  const id = document.getElementById('product-edit-id').value;
+  const name = document.getElementById('product-name').value.trim();
+  const price = parseInt(document.getElementById('product-price').value);
+  if (!name) { showToast('商品名を入力してください'); return; }
+  if (isNaN(price) || price < 0) { showToast('正しい単価を入力してください'); return; }
+
+  const products = getProducts();
+  if (id) {
+    const idx = products.findIndex(p => p.id === id);
+    products[idx] = { id, name, price };
+  } else {
+    const newId = 'p' + String(Date.now()).slice(-6);
+    products.push({ id: newId, name, price });
+  }
+  saveData('products', products);
+  closeModal('product-modal');
+  renderProductList();
+  showToast('商品を保存しました');
+}
+
+function deleteProduct(id) {
+  if (!confirm('この商品を削除しますか？')) return;
+  const products = getProducts().filter(p => p.id !== id);
+  saveData('products', products);
+  renderProductList();
+  showToast('商品を削除しました');
+}
+
+function closeModal(modalId) {
+  document.getElementById(modalId).classList.remove('active');
+}
+
+// モーダル外クリックで閉じる
+document.querySelectorAll('.modal-overlay').forEach(overlay => {
+  overlay.addEventListener('click', function(e) {
+    if (e.target === this) this.classList.remove('active');
+  });
+});
+
+// === 初期化 ===
+initData();
+
+// CDNライブラリ読み込み状態チェック
+window.addEventListener('load', function() {
+  console.log('html2canvas:', typeof html2canvas !== 'undefined' ? '読み込み済み ✓' : '読み込み失敗 ✗');
+  console.log('jsPDF:', typeof window.jspdf !== 'undefined' ? '読み込み済み ✓' : '読み込み失敗 ✗');
+});
+</script>
+</body>
+</html>
