@@ -1,6 +1,9 @@
 // === スプレッドシートID（デプロイ前に設定） ===
 var SPREADSHEET_ID = "";
 
+// === GoogleドライブフォルダID ===
+var DRIVE_FOLDER_ID = "1GJf6Bl8LL-HIYeYCvMJf12jWk308zSHH";
+
 // === 定数 ===
 var HISTORY_SHEET_NAME = "出荷履歴";
 var PRODUCT_ORDER = [
@@ -37,8 +40,25 @@ function doPost(e) {
       ]);
     }
 
+    // PDF をGoogleドライブに保存（失敗しても続行）
+    var driveStatus = "skipped";
+    if (data.pdfBase64 && DRIVE_FOLDER_ID) {
+      try {
+        var pdfBlob = Utilities.newBlob(
+          Utilities.base64Decode(data.pdfBase64),
+          "application/pdf",
+          "納品書_" + data.storeName + "_" + data.date + ".pdf"
+        );
+        var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+        folder.createFile(pdfBlob);
+        driveStatus = "ok";
+      } catch (driveErr) {
+        driveStatus = "error: " + driveErr.message;
+      }
+    }
+
     return ContentService
-      .createTextOutput(JSON.stringify({ status: "ok" }))
+      .createTextOutput(JSON.stringify({ status: "ok", drive: driveStatus }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService
