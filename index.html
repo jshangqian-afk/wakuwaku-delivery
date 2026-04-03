@@ -470,7 +470,7 @@ async function renderAndDownloadPDF(store, delivery, isReprint) {
   }
 }
 
-// === GAS送信（GET + no-cors：Safari CORS回避） ===
+// === GAS送信（iframe+form GET方式：Safari ITP/CORS完全回避） ===
 function sendToSheet(delivery, store) {
   if (!GAS_URL) return;
   try {
@@ -483,19 +483,39 @@ function sendToSheet(delivery, store) {
         return { productName: item.productName, qty: item.qty, price: item.price };
       })
     };
-    var url = GAS_URL + '?data=' + encodeURIComponent(JSON.stringify(payload));
-    console.log('GAS送信URL:', url);
+    var jsonStr = JSON.stringify(payload);
+    console.log('GAS送信データ:', jsonStr);
 
-    // 方法1: Image要素でGETリクエスト（最も確実、CORS制約なし）
-    var img = new Image();
-    img.onload = function() { console.log('GAS送信成功(img)'); };
-    img.onerror = function() { console.log('GAS送信完了(img) ※onerrorでも送信自体は成功している場合があります'); };
-    img.src = url;
+    // 非表示iframe作成
+    var iframe = document.createElement('iframe');
+    iframe.name = 'gasFrame';
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
 
-    // 方法2: fetch no-corsをバックアップとして同時実行
-    fetch(url, { mode: 'no-cors', redirect: 'follow' })
-      .then(function() { console.log('GAS送信完了(fetch no-cors)'); })
-      .catch(function(e) { console.log('fetch no-cors失敗(imgで送信済み):', e.message); });
+    // 非表示form作成
+    var form = document.createElement('form');
+    form.method = 'GET';
+    form.action = GAS_URL;
+    form.target = 'gasFrame';
+    form.style.display = 'none';
+
+    // dataパラメータ
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'data';
+    input.value = jsonStr;
+    form.appendChild(input);
+
+    document.body.appendChild(form);
+    form.submit();
+    console.log('GAS送信完了(form submit)');
+
+    // 5秒後にiframeとformを削除
+    setTimeout(function() {
+      document.body.removeChild(iframe);
+      document.body.removeChild(form);
+      console.log('GAS送信用要素を削除');
+    }, 5000);
   } catch (e) {
     console.error('GAS送信エラー:', e);
   }
