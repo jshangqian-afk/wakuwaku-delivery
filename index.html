@@ -395,7 +395,7 @@ async function generatePDF() {
   };
 
   // PDF用HTML生成
-  await renderAndDownloadPDF(store, delivery, false);
+  const pdfBase64 = await renderAndDownloadPDF(store, delivery, false);
 
   // 履歴保存
   const deliveries = getDeliveries();
@@ -403,7 +403,7 @@ async function generatePDF() {
   saveData('deliveries', deliveries);
 
   // GAS送信（非同期・エラー無視）
-  sendToSheet(delivery, store);
+  sendToSheet(delivery, store, pdfBase64);
 
   showToast('PDFを生成しました');
 }
@@ -462,16 +462,21 @@ async function renderAndDownloadPDF(store, delivery, isReprint) {
     const fileName = '納品書_' + delivery.storeName + '_' + delivery.date + '.pdf';
     pdf.save(fileName);
     console.log('PDF保存完了:', fileName);
+
+    // base64データを返す（GAS Drive保存用）
+    var pdfOutput = pdf.output('datauristring');
+    return pdfOutput.split(',')[1];
   } catch (e) {
     console.error('PDF生成エラー:', e);
     showToast('PDF生成中にエラーが発生しました');
+    return null;
   } finally {
     container.innerHTML = '';
   }
 }
 
-// === GAS送信（sendBeacon方式：Safari対応・ページ遷移なし） ===
-function sendToSheet(delivery, store) {
+// === GAS送信 ===
+async function sendToSheet(delivery, store, pdfBase64) {
   if (!GAS_URL) return;
   try {
     var payload = {
@@ -479,23 +484,17 @@ function sendToSheet(delivery, store) {
       storeName: store.name,
       address: store.address,
       phone: store.phone,
-      items: delivery.items.map(function(item) {
-        return { productName: item.productName, qty: item.qty, price: item.price };
-      })
+      items: delivery.items
     };
-    var jsonStr = JSON.stringify(payload);
-    console.log('GAS送信データ:', jsonStr);
-
-    var blob = new Blob([jsonStr], { type: 'application/json' });
-    if (navigator.sendBeacon) {
-      var result = navigator.sendBeacon(GAS_URL, blob);
-      console.log('sendBeacon送信:', result ? '成功' : '失敗');
-    } else {
-      console.log('sendBeacon非対応、fetch no-corsで送信');
-      fetch(GAS_URL, { mode: 'no-cors', method: 'POST', body: jsonStr });
+    if (pdfBase64) {
+      payload.pdfBase64 = pdfBase64;
     }
+    await fetch(GAS_URL, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
   } catch (e) {
-    console.error('GAS送信エラー:', e);
+    // エラー無視で続行
   }
 }
 

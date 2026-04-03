@@ -1,5 +1,8 @@
-// === スプレッドシートID（デプロイ前に設定） ===
-var SPREADSHEET_ID = "";
+// === スプレッドシートID ===
+var SPREADSHEET_ID = "19vyOw7JDEhSSVeATes1w2aRiS1ssFzy4cn3gLhEuaKM";
+
+// === GoogleドライブフォルダID ===
+var DRIVE_FOLDER_ID = "1GJf6Bl8LL-HIYeYCvMJf12jWk308zSHH";
 
 // === 定数 ===
 var HISTORY_SHEET_NAME = "出荷履歴";
@@ -11,69 +14,57 @@ var PRODUCT_ORDER = [
   "匠大辛一本漬け"
 ];
 
-// === 共通処理：データ受信→スプレッドシート記録 ===
-function processDeliveryData(data) {
-  Logger.log("データ受信: storeName=" + data.storeName + ", date=" + data.date + ", items数=" + (data.items ? data.items.length : 0));
-
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  var sheet = ss.getSheetByName(HISTORY_SHEET_NAME);
-  if (!sheet) {
-    sheet = ss.insertSheet(HISTORY_SHEET_NAME);
-    sheet.appendRow(["日付", "店舗名", "住所", "電話番号", "商品名", "数量", "単価", "金額"]);
-    Logger.log("出荷履歴シートを新規作成");
-  }
-
-  var items = data.items || [];
-  for (var i = 0; i < items.length; i++) {
-    var item = items[i];
-    sheet.appendRow([
-      data.date,
-      data.storeName,
-      data.address || "",
-      data.phone || "",
-      item.productName,
-      item.qty,
-      item.price,
-      item.qty * item.price
-    ]);
-    Logger.log("行追記: " + item.productName + " x" + item.qty);
-  }
-
-  Logger.log("処理完了: " + items.length + "件記録");
-  return { status: "ok", count: items.length };
-}
-
-// === Webアプリ：GETリクエスト受信（CORS回避用） ===
-function doGet(e) {
-  var result;
-  try {
-    var jsonStr = e.parameter.data || "{}";
-    Logger.log("doGet受信: " + jsonStr.substring(0, 200));
-    var data = JSON.parse(jsonStr);
-    result = processDeliveryData(data);
-  } catch (err) {
-    Logger.log("doGetエラー: " + err.message);
-    result = { status: "error", message: err.message };
-  }
-  return ContentService
-    .createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-
-// === Webアプリ：POSTリクエスト受信（後方互換） ===
+// === Webアプリ：POSTリクエスト受信 ===
 function doPost(e) {
-  var result;
   try {
     var data = JSON.parse(e.postData.contents);
-    Logger.log("doPost受信");
-    result = processDeliveryData(data);
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(HISTORY_SHEET_NAME);
+    if (!sheet) {
+      sheet = ss.insertSheet(HISTORY_SHEET_NAME);
+      sheet.appendRow(["日付", "店舗名", "住所", "電話番号", "商品名", "数量", "単価", "金額"]);
+    }
+
+    var items = data.items || [];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      sheet.appendRow([
+        data.date,
+        data.storeName,
+        data.address || "",
+        data.phone || "",
+        item.productName,
+        item.qty,
+        item.price,
+        item.qty * item.price
+      ]);
+    }
+
+    // PDF をGoogleドライブに保存（失敗しても続行）
+    var driveStatus = "skipped";
+    if (data.pdfBase64 && DRIVE_FOLDER_ID) {
+      try {
+        var pdfBlob = Utilities.newBlob(
+          Utilities.base64Decode(data.pdfBase64),
+          "application/pdf",
+          "納品書_" + data.storeName + "_" + data.date + ".pdf"
+        );
+        var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+        folder.createFile(pdfBlob);
+        driveStatus = "ok";
+      } catch (driveErr) {
+        driveStatus = "error: " + driveErr.message;
+      }
+    }
+
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: "ok", drive: driveStatus }))
+      .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
-    Logger.log("doPostエラー: " + err.message);
-    result = { status: "error", message: err.message };
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: "error", message: err.message }))
+      .setMimeType(ContentService.MimeType.JSON);
   }
-  return ContentService
-    .createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // === メニュー追加 ===
@@ -127,7 +118,6 @@ function generateShippingReport(yearMonth) {
   for (var i = 0; i < data.length; i++) {
     var row = data[i];
     var dateVal = row[0].toString();
-    // Date型の場合はYYYY-MM-DD文字列に変換
     if (row[0] instanceof Date) {
       dateVal = Utilities.formatDate(row[0], Session.getScriptTimeZone(), "yyyy-MM-dd");
     }
@@ -151,7 +141,6 @@ function generateShippingReport(yearMonth) {
   }
 
   // 店舗×商品ごとに数量を集計
-  // storeMap: { storeName: { productName: qty, ... } }
   var storeMap = {};
   var storeOrder = [];
   for (var i = 0; i < filtered.length; i++) {
@@ -246,4 +235,11 @@ function generateShippingReport(yearMonth) {
     reportSheet.getRange(2, 2, lastRowNum - 1, PRODUCT_ORDER.length + 1)
       .setHorizontalAlignment("center");
   }
+}
+
+// === テスト用関数 ===
+function testDriveSave() {
+  var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  var file = folder.createFile('test.txt', 'テスト保存', MimeType.PLAIN_TEXT);
+  Logger.log('保存成功: ' + file.getName());
 }
