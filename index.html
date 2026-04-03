@@ -476,7 +476,7 @@ async function renderAndDownloadPDF(store, delivery, isReprint) {
   }
 }
 
-// === GAS送信 ===
+// === GAS送信（GET方式：CORS回避） ===
 async function sendToSheet(delivery, store, pdfBase64) {
   if (!GAS_URL) return;
   try {
@@ -487,13 +487,12 @@ async function sendToSheet(delivery, store, pdfBase64) {
       phone: store.phone,
       items: delivery.items
     };
-    if (pdfBase64) {
-      payload.pdfBase64 = pdfBase64;
-    }
-    await fetch(GAS_URL, {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
+    // GETのURLパラメータにはサイズ制限があるためpdfBase64は除外
+    console.log('GAS送信(GET): ', { date: payload.date, storeName: payload.storeName, items数: payload.items.length });
+    var url = GAS_URL + '?data=' + encodeURIComponent(JSON.stringify(payload));
+    var response = await fetch(url);
+    var result = await response.text();
+    console.log('GASレスポンス:', result);
   } catch (e) {
     console.error('GAS送信エラー:', e);
   }

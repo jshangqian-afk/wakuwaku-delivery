@@ -14,15 +14,17 @@ var PRODUCT_ORDER = [
   "匠大辛一本漬け"
 ];
 
-// === Webアプリ：POSTリクエスト受信 ===
-function doPost(e) {
-  try {
-    var data = JSON.parse(e.postData.contents);
+// === 共通処理：データ受信→スプレッドシート記録＋Drive保存 ===
+function processDeliveryData(data) {
+  Logger.log("データ受信: storeName=" + data.storeName + ", date=" + data.date + ", items数=" + (data.items ? data.items.length : 0));
+  Logger.log("pdfBase64の有無: " + (data.pdfBase64 ? "あり (" + data.pdfBase64.length + "文字)" : "なし"));
+
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     var sheet = ss.getSheetByName(HISTORY_SHEET_NAME);
     if (!sheet) {
       sheet = ss.insertSheet(HISTORY_SHEET_NAME);
       sheet.appendRow(["日付", "店舗名", "住所", "電話番号", "商品名", "数量", "単価", "金額"]);
+      Logger.log("出荷履歴シートを新規作成");
     }
 
     var items = data.items || [];
@@ -38,33 +40,72 @@ function doPost(e) {
         item.price,
         item.qty * item.price
       ]);
+      Logger.log("行追記: " + item.productName + " x" + item.qty);
     }
 
     // PDF をGoogleドライブに保存（失敗しても続行）
     var driveStatus = "skipped";
     if (data.pdfBase64 && DRIVE_FOLDER_ID) {
       try {
+        Logger.log("Drive保存開始: フォルダID=" + DRIVE_FOLDER_ID);
+        var decoded = Utilities.base64Decode(data.pdfBase64);
+        Logger.log("base64デコード完了: " + decoded.length + "バイト");
         var pdfBlob = Utilities.newBlob(
-          Utilities.base64Decode(data.pdfBase64),
+          decoded,
           "application/pdf",
           "納品書_" + data.storeName + "_" + data.date + ".pdf"
         );
         var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
-        folder.createFile(pdfBlob);
+        var file = folder.createFile(pdfBlob);
         driveStatus = "ok";
+        Logger.log("Drive保存完了: " + file.getName() + " (" + file.getSize() + "バイト)");
       } catch (driveErr) {
         driveStatus = "error: " + driveErr.message;
+        Logger.log("Drive保存エラー: " + driveErr.message);
       }
+    } else {
+      Logger.log("Drive保存スキップ: pdfBase64=" + !!data.pdfBase64 + ", DRIVE_FOLDER_ID=" + !!DRIVE_FOLDER_ID);
     }
 
-    return ContentService
-      .createTextOutput(JSON.stringify({ status: "ok", drive: driveStatus }))
-      .setMimeType(ContentService.MimeType.JSON);
+    Logger.log("処理完了: status=ok, drive=" + driveStatus);
+    return { status: "ok", drive: driveStatus };
   } catch (err) {
-    return ContentService
-      .createTextOutput(JSON.stringify({ status: "error", message: err.message }))
-      .setMimeType(ContentService.MimeType.JSON);
+    Logger.log("処理エラー: " + err.message);
+    return { status: "error", message: err.message };
   }
+}
+
+// === Webアプリ：GETリクエスト受信（CORS回避用） ===
+function doGet(e) {
+  var result;
+  try {
+    var jsonStr = e.parameter.data || "{}";
+    Logger.log("doGet受信: " + jsonStr.substring(0, 200));
+    var data = JSON.parse(jsonStr);
+    result = processDeliveryData(data);
+  } catch (err) {
+    Logger.log("doGetエラー: " + err.message);
+    result = { status: "error", message: err.message };
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// === Webアプリ：POSTリクエスト受信 ===
+function doPost(e) {
+  var result;
+  try {
+    var data = JSON.parse(e.postData.contents);
+    Logger.log("doPost受信");
+    result = processDeliveryData(data);
+  } catch (err) {
+    Logger.log("doPostエラー: " + err.message);
+    result = { status: "error", message: err.message };
+  }
+  return ContentService
+    .createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // === メニュー追加 ===
@@ -237,4 +278,11 @@ function generateShippingReport(yearMonth) {
     reportSheet.getRange(2, 2, lastRowNum - 1, PRODUCT_ORDER.length + 1)
       .setHorizontalAlignment("center");
   }
+}
+
+// === テスト用関数 ===
+function testDriveSave() {
+  var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  var file = folder.createFile('test.txt', 'テスト保存', MimeType.PLAIN_TEXT);
+  Logger.log('保存成功: ' + file.getName());
 }
