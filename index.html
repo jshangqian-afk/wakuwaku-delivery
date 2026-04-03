@@ -427,14 +427,14 @@ async function renderAndDownloadPDF(store, delivery, isReprint) {
       (isCopy ? '<div class="slip-copy-label">（控）</div>' : '') +
       '<div class="slip-title">納　品　書</div>' +
       '<div class="slip-date">' + warekiDate + '</div>' +
-      '<div class="slip-to"><span class="slip-to-line">' + delivery.storeName + ' 様</span></div>' +
+      '<div class="slip-to"><span class="slip-to-line">' + delivery.storeName + '店 様</span></div>' +
       '<div class="slip-from">株式会社 フラワーファクトリーフルール<br>〒長野県上田市古里827番地3<br>TEL 0268-71-5959　FAX 0268-25-8755</div>' +
       '<table class="slip-table"><thead><tr><th>品名</th><th>数量</th><th>単価</th><th>金額</th></tr></thead><tbody>' + rows + '</tbody></table>' +
       '<div class="slip-stamps">' +
         '<div class="slip-stamp-box">担当者<br>&nbsp;</div>' +
         '<div class="slip-stamp-box">受領印<br>&nbsp;</div>' +
       '</div>' +
-      '<div class="slip-note">※賞味期限2日前より商品単価から30%の値下げをお願いいたします。</div>' +
+      '<div class="slip-note">※賞味期限2日前より商品単価から30%の値下げをお願いいたします。<br>※価格は全て税別となっております。</div>' +
     '</div>';
   }
 
