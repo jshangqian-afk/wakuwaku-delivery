@@ -470,8 +470,8 @@ async function renderAndDownloadPDF(store, delivery, isReprint) {
   }
 }
 
-// === GAS送信（GET方式：CORS回避） ===
-async function sendToSheet(delivery, store) {
+// === GAS送信（GET + no-cors：Safari CORS回避） ===
+function sendToSheet(delivery, store) {
   if (!GAS_URL) return;
   try {
     var payload = {
@@ -483,11 +483,19 @@ async function sendToSheet(delivery, store) {
         return { productName: item.productName, qty: item.qty, price: item.price };
       })
     };
-    console.log('GAS送信(GET):', payload);
     var url = GAS_URL + '?data=' + encodeURIComponent(JSON.stringify(payload));
-    var response = await fetch(url);
-    var result = await response.text();
-    console.log('GASレスポンス:', result);
+    console.log('GAS送信URL:', url);
+
+    // 方法1: Image要素でGETリクエスト（最も確実、CORS制約なし）
+    var img = new Image();
+    img.onload = function() { console.log('GAS送信成功(img)'); };
+    img.onerror = function() { console.log('GAS送信完了(img) ※onerrorでも送信自体は成功している場合があります'); };
+    img.src = url;
+
+    // 方法2: fetch no-corsをバックアップとして同時実行
+    fetch(url, { mode: 'no-cors', redirect: 'follow' })
+      .then(function() { console.log('GAS送信完了(fetch no-cors)'); })
+      .catch(function(e) { console.log('fetch no-cors失敗(imgで送信済み):', e.message); });
   } catch (e) {
     console.error('GAS送信エラー:', e);
   }
