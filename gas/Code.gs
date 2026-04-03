@@ -140,20 +140,26 @@ function generateShippingReport(yearMonth) {
     return;
   }
 
-  // 店舗×商品ごとに数量を集計
-  var storeMap = {};
-  var storeOrder = [];
+  // 日付×店舗ごとに商品数量を集計
+  var rowMap = {};
+  var rowOrder = [];
   for (var i = 0; i < filtered.length; i++) {
     var r = filtered[i];
-    if (!storeMap[r.storeName]) {
-      storeMap[r.storeName] = {};
-      storeOrder.push(r.storeName);
+    var key = r.date + "|" + r.storeName;
+    if (!rowMap[key]) {
+      rowMap[key] = { date: r.date, storeName: r.storeName, products: {} };
+      rowOrder.push(key);
     }
-    if (!storeMap[r.storeName][r.productName]) {
-      storeMap[r.storeName][r.productName] = 0;
+    if (!rowMap[key].products[r.productName]) {
+      rowMap[key].products[r.productName] = 0;
     }
-    storeMap[r.storeName][r.productName] += r.qty;
+    rowMap[key].products[r.productName] += r.qty;
   }
+
+  // 日付順にソート
+  rowOrder.sort(function(a, b) {
+    return rowMap[a].date.localeCompare(rowMap[b].date);
+  });
 
   // 出荷表シート作成（既存なら上書き）
   var parts = yearMonth.split("-");
@@ -166,7 +172,7 @@ function generateShippingReport(yearMonth) {
   }
 
   // ヘッダー行
-  var headerRow = ["店舗名"];
+  var headerRow = ["日付", "店舗名"];
   for (var p = 0; p < PRODUCT_ORDER.length; p++) {
     headerRow.push(PRODUCT_ORDER[p]);
   }
@@ -187,27 +193,29 @@ function generateShippingReport(yearMonth) {
   }
   var grandTotalQty = 0;
 
-  // 店舗ごとにデータ行を出力
-  for (var s = 0; s < storeOrder.length; s++) {
-    var storeName = storeOrder[s];
-    var products = storeMap[storeName];
-    var row = [storeName];
-    var storeTotal = 0;
+  // 日付×店舗ごとにデータ行を出力
+  for (var i = 0; i < rowOrder.length; i++) {
+    var entry = rowMap[rowOrder[i]];
+    // 日付を月/日形式に変換
+    var dateParts = entry.date.split("-");
+    var dateDisplay = parseInt(dateParts[1]) + "/" + parseInt(dateParts[2]);
+    var row = [dateDisplay, entry.storeName];
+    var rowTotal = 0;
 
     for (var p = 0; p < PRODUCT_ORDER.length; p++) {
       var pName = PRODUCT_ORDER[p];
-      var qty = products[pName] || 0;
+      var qty = entry.products[pName] || 0;
       row.push(qty > 0 ? qty : "");
       grandTotal[pName] += qty;
-      storeTotal += qty;
+      rowTotal += qty;
     }
-    row.push(storeTotal);
-    grandTotalQty += storeTotal;
+    row.push(rowTotal);
+    grandTotalQty += rowTotal;
     reportSheet.appendRow(row);
   }
 
   // 総合計行
-  var totalRow = ["合計"];
+  var totalRow = ["", "合計"];
   for (var p = 0; p < PRODUCT_ORDER.length; p++) {
     var qty = grandTotal[PRODUCT_ORDER[p]];
     totalRow.push(qty > 0 ? qty : "");
@@ -232,7 +240,7 @@ function generateShippingReport(yearMonth) {
 
   // 数量列を中央揃え
   if (lastRowNum > 1) {
-    reportSheet.getRange(2, 2, lastRowNum - 1, PRODUCT_ORDER.length + 1)
+    reportSheet.getRange(2, 3, lastRowNum - 1, PRODUCT_ORDER.length + 1)
       .setHorizontalAlignment("center");
   }
 }
