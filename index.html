@@ -99,6 +99,7 @@ h3 { font-size: 18px; margin: 16px 0 10px; color: #555; }
 .slip-stamps { display: flex; justify-content: flex-end; gap: 0; margin: 8px 0; }
 .slip-stamp-box { width: 60px; height: 50px; border: 1px solid #333; text-align: center; font-size: 11px; line-height: 18px; }
 .slip-note { font-size: 11px; color: #555; margin-top: 4px; }
+.slip-code { font-size: 10px; color: #666; margin-top: 4px; }
 
 .empty-message { text-align: center; color: #999; padding: 40px; font-size: 16px; }
 
@@ -132,6 +133,13 @@ h3 { font-size: 18px; margin: 16px 0 10px; color: #555; }
   <div class="form-group">
     <label>納品日</label>
     <input type="date" id="create-date">
+  </div>
+  <div class="form-group">
+    <label>担当者</label>
+    <select id="create-staff">
+      <option value="平林">平林</option>
+      <option value="柳澤">柳澤</option>
+    </select>
   </div>
   <h3>商品・数量入力</h3>
   <table class="product-table">
@@ -395,7 +403,8 @@ async function generatePDF() {
   };
 
   // PDF用HTML生成
-  const pdfBase64 = await renderAndDownloadPDF(store, delivery, false);
+  const staffName = document.getElementById('create-staff').value;
+  const pdfBase64 = await renderAndDownloadPDF(store, delivery, false, staffName);
 
   // 履歴保存
   const deliveries = getDeliveries();
@@ -408,7 +417,8 @@ async function generatePDF() {
   showToast('PDFを生成しました');
 }
 
-async function renderAndDownloadPDF(store, delivery, isReprint) {
+async function renderAndDownloadPDF(store, delivery, isReprint, staffName) {
+  staffName = staffName || '平林';
   const container = document.getElementById('pdf-container');
   const warekiDate = toWareki(delivery.date);
 
@@ -431,10 +441,11 @@ async function renderAndDownloadPDF(store, delivery, isReprint) {
       '<div class="slip-from">株式会社 フラワーファクトリーフルール<br>〒長野県上田市古里827番地3<br>TEL 0268-71-5959　FAX 0268-25-8755</div>' +
       '<table class="slip-table"><thead><tr><th>品名</th><th>数量</th><th>単価</th><th>金額</th></tr></thead><tbody>' + rows + '</tbody></table>' +
       '<div class="slip-stamps">' +
-        '<div class="slip-stamp-box">担当者<br>&nbsp;</div>' +
+        '<div class="slip-stamp-box">担当者<br>' + staffName + '</div>' +
         '<div class="slip-stamp-box">受領印<br>&nbsp;</div>' +
       '</div>' +
       '<div class="slip-note">※賞味期限2日前より商品単価から30%の値下げをお願いいたします。<br>※価格は全て税別となっております。</div>' +
+      '<div class="slip-code">コード：39319</div>' +
     '</div>';
   }
 
