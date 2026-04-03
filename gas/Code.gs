@@ -1,9 +1,6 @@
 // === スプレッドシートID（デプロイ前に設定） ===
 var SPREADSHEET_ID = "";
 
-// === GoogleドライブフォルダID ===
-var DRIVE_FOLDER_ID = "1GJf6Bl8LL-HIYeYCvMJf12jWk308zSHH";
-
 // === 定数 ===
 var HISTORY_SHEET_NAME = "出荷履歴";
 var PRODUCT_ORDER = [
@@ -14,65 +11,36 @@ var PRODUCT_ORDER = [
   "匠大辛一本漬け"
 ];
 
-// === 共通処理：データ受信→スプレッドシート記録＋Drive保存 ===
+// === 共通処理：データ受信→スプレッドシート記録 ===
 function processDeliveryData(data) {
   Logger.log("データ受信: storeName=" + data.storeName + ", date=" + data.date + ", items数=" + (data.items ? data.items.length : 0));
-  Logger.log("pdfBase64の有無: " + (data.pdfBase64 ? "あり (" + data.pdfBase64.length + "文字)" : "なし"));
 
-    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-    var sheet = ss.getSheetByName(HISTORY_SHEET_NAME);
-    if (!sheet) {
-      sheet = ss.insertSheet(HISTORY_SHEET_NAME);
-      sheet.appendRow(["日付", "店舗名", "住所", "電話番号", "商品名", "数量", "単価", "金額"]);
-      Logger.log("出荷履歴シートを新規作成");
-    }
-
-    var items = data.items || [];
-    for (var i = 0; i < items.length; i++) {
-      var item = items[i];
-      sheet.appendRow([
-        data.date,
-        data.storeName,
-        data.address || "",
-        data.phone || "",
-        item.productName,
-        item.qty,
-        item.price,
-        item.qty * item.price
-      ]);
-      Logger.log("行追記: " + item.productName + " x" + item.qty);
-    }
-
-    // PDF をGoogleドライブに保存（失敗しても続行）
-    var driveStatus = "skipped";
-    if (data.pdfBase64 && DRIVE_FOLDER_ID) {
-      try {
-        Logger.log("Drive保存開始: フォルダID=" + DRIVE_FOLDER_ID);
-        var decoded = Utilities.base64Decode(data.pdfBase64);
-        Logger.log("base64デコード完了: " + decoded.length + "バイト");
-        var pdfBlob = Utilities.newBlob(
-          decoded,
-          "application/pdf",
-          "納品書_" + data.storeName + "_" + data.date + ".pdf"
-        );
-        var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
-        var file = folder.createFile(pdfBlob);
-        driveStatus = "ok";
-        Logger.log("Drive保存完了: " + file.getName() + " (" + file.getSize() + "バイト)");
-      } catch (driveErr) {
-        driveStatus = "error: " + driveErr.message;
-        Logger.log("Drive保存エラー: " + driveErr.message);
-      }
-    } else {
-      Logger.log("Drive保存スキップ: pdfBase64=" + !!data.pdfBase64 + ", DRIVE_FOLDER_ID=" + !!DRIVE_FOLDER_ID);
-    }
-
-    Logger.log("処理完了: status=ok, drive=" + driveStatus);
-    return { status: "ok", drive: driveStatus };
-  } catch (err) {
-    Logger.log("処理エラー: " + err.message);
-    return { status: "error", message: err.message };
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(HISTORY_SHEET_NAME);
+  if (!sheet) {
+    sheet = ss.insertSheet(HISTORY_SHEET_NAME);
+    sheet.appendRow(["日付", "店舗名", "住所", "電話番号", "商品名", "数量", "単価", "金額"]);
+    Logger.log("出荷履歴シートを新規作成");
   }
+
+  var items = data.items || [];
+  for (var i = 0; i < items.length; i++) {
+    var item = items[i];
+    sheet.appendRow([
+      data.date,
+      data.storeName,
+      data.address || "",
+      data.phone || "",
+      item.productName,
+      item.qty,
+      item.price,
+      item.qty * item.price
+    ]);
+    Logger.log("行追記: " + item.productName + " x" + item.qty);
+  }
+
+  Logger.log("処理完了: " + items.length + "件記録");
+  return { status: "ok", count: items.length };
 }
 
 // === Webアプリ：GETリクエスト受信（CORS回避用） ===
@@ -92,7 +60,7 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-// === Webアプリ：POSTリクエスト受信 ===
+// === Webアプリ：POSTリクエスト受信（後方互換） ===
 function doPost(e) {
   var result;
   try {
@@ -278,11 +246,4 @@ function generateShippingReport(yearMonth) {
     reportSheet.getRange(2, 2, lastRowNum - 1, PRODUCT_ORDER.length + 1)
       .setHorizontalAlignment("center");
   }
-}
-
-// === テスト用関数 ===
-function testDriveSave() {
-  var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
-  var file = folder.createFile('test.txt', 'テスト保存', MimeType.PLAIN_TEXT);
-  Logger.log('保存成功: ' + file.getName());
 }

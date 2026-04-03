@@ -395,7 +395,7 @@ async function generatePDF() {
   };
 
   // PDF用HTML生成
-  const pdfBase64 = await renderAndDownloadPDF(store, delivery, false);
+  await renderAndDownloadPDF(store, delivery, false);
 
   // 履歴保存
   const deliveries = getDeliveries();
@@ -403,7 +403,7 @@ async function generatePDF() {
   saveData('deliveries', deliveries);
 
   // GAS送信（非同期・エラー無視）
-  sendToSheet(delivery, store, pdfBase64);
+  sendToSheet(delivery, store);
 
   showToast('PDFを生成しました');
 }
@@ -462,22 +462,16 @@ async function renderAndDownloadPDF(store, delivery, isReprint) {
     const fileName = '納品書_' + delivery.storeName + '_' + delivery.date + '.pdf';
     pdf.save(fileName);
     console.log('PDF保存完了:', fileName);
-
-    // base64データを返す（GAS Drive保存用）
-    var pdfOutput = pdf.output('datauristring');
-    // "data:application/pdf;base64,XXXX" から base64部分を抽出
-    return pdfOutput.split(',')[1];
   } catch (e) {
     console.error('PDF生成エラー:', e);
     showToast('PDF生成中にエラーが発生しました');
-    return null;
   } finally {
     container.innerHTML = '';
   }
 }
 
 // === GAS送信（GET方式：CORS回避） ===
-async function sendToSheet(delivery, store, pdfBase64) {
+async function sendToSheet(delivery, store) {
   if (!GAS_URL) return;
   try {
     var payload = {
@@ -485,10 +479,11 @@ async function sendToSheet(delivery, store, pdfBase64) {
       storeName: store.name,
       address: store.address,
       phone: store.phone,
-      items: delivery.items
+      items: delivery.items.map(function(item) {
+        return { productName: item.productName, qty: item.qty, price: item.price };
+      })
     };
-    // GETのURLパラメータにはサイズ制限があるためpdfBase64は除外
-    console.log('GAS送信(GET): ', { date: payload.date, storeName: payload.storeName, items数: payload.items.length });
+    console.log('GAS送信(GET):', payload);
     var url = GAS_URL + '?data=' + encodeURIComponent(JSON.stringify(payload));
     var response = await fetch(url);
     var result = await response.text();
