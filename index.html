@@ -500,12 +500,15 @@ async function sendToSheet(delivery, store, pdfBase64) {
     if (pdfBase64) {
       payload.pdfBase64 = pdfBase64;
     }
-    await fetch(GAS_URL, {
+    const response = await fetch(GAS_URL, {
       method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify(payload)
     });
+    const result = await response.json();
+    console.log('GAS送信結果:', result);
   } catch (e) {
-    // エラー無視で続行
+    console.error('GAS送信エラー:', e);
   }
 }
 
