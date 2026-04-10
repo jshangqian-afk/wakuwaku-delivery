@@ -563,7 +563,8 @@ async function reprintPDF(deliveryId) {
     const delivery = getDeliveries().find(d => d.id === deliveryId);
     if (!delivery) return;
     const store = getStores().find(s => s.id === delivery.storeId) || { name: delivery.storeName, address: '', phone: '' };
-    await renderAndDownloadPDF(store, delivery, true);
+    const pdfBase64 = await renderAndDownloadPDF(store, delivery, true);
+    sendToSheet(delivery, store, pdfBase64);
     showToast('PDFを再出力しました');
   } catch (e) {
     console.error('reprintPDF error:', e);
