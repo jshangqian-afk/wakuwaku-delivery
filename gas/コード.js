@@ -123,14 +123,10 @@ function generateShippingReport(yearMonth) {
     }
     if (dateVal.substring(0, 7) === yearMonth) {
       filtered.push({
-        date: dateVal,
         storeName: row[1].toString(),
-        address: row[2].toString(),
-        phone: row[3].toString(),
         productName: row[4].toString(),
         qty: Number(row[5]) || 0,
-        price: Number(row[6]) || 0,
-        amount: Number(row[7]) || 0
+        price: Number(row[6]) || 0
       });
     }
   }
@@ -140,14 +136,36 @@ function generateShippingReport(yearMonth) {
     return;
   }
 
-  // 日付×店舗ごとに商品数量を集計
+  // 商品列を動的に取得（PRODUCT_ORDERを優先順として使い、残りを後ろに追加）
+  var productSet = {};
+  var priceMap = {};
+  for (var i = 0; i < filtered.length; i++) {
+    var r = filtered[i];
+    productSet[r.productName] = true;
+    if (priceMap[r.productName] === undefined) {
+      priceMap[r.productName] = r.price;
+    }
+  }
+  var productColumns = [];
+  for (var p = 0; p < PRODUCT_ORDER.length; p++) {
+    if (productSet[PRODUCT_ORDER[p]]) {
+      productColumns.push(PRODUCT_ORDER[p]);
+    }
+  }
+  for (var name in productSet) {
+    if (productColumns.indexOf(name) === -1) {
+      productColumns.push(name);
+    }
+  }
+
+  // 店舗ごとに数量を集計（日付は無視）
   var rowMap = {};
   var rowOrder = [];
   for (var i = 0; i < filtered.length; i++) {
     var r = filtered[i];
-    var key = r.date + "|" + r.storeName;
+    var key = r.storeName;
     if (!rowMap[key]) {
-      rowMap[key] = { date: r.date, storeName: r.storeName, products: {} };
+      rowMap[key] = { storeName: r.storeName, products: {} };
       rowOrder.push(key);
     }
     if (!rowMap[key].products[r.productName]) {
@@ -156,10 +174,8 @@ function generateShippingReport(yearMonth) {
     rowMap[key].products[r.productName] += r.qty;
   }
 
-  // 日付順にソート
-  rowOrder.sort(function(a, b) {
-    return rowMap[a].date.localeCompare(rowMap[b].date);
-  });
+  // 店舗名順にソート
+  rowOrder.sort();
 
   // 出荷表シート作成（既存なら上書き）
   var parts = yearMonth.split("-");
@@ -171,12 +187,15 @@ function generateShippingReport(yearMonth) {
     reportSheet = ss.insertSheet(sheetName);
   }
 
-  // ヘッダー行
-  var headerRow = ["日付", "店舗名"];
-  for (var p = 0; p < PRODUCT_ORDER.length; p++) {
-    headerRow.push(PRODUCT_ORDER[p]);
+  var numProducts = productColumns.length;
+
+  // ヘッダー行: ["店舗名", 商品名..., "合計数量", "合計金額"]
+  var headerRow = ["店舗名"];
+  for (var p = 0; p < numProducts; p++) {
+    headerRow.push(productColumns[p]);
   }
   headerRow.push("合計数量");
+  headerRow.push("合計金額");
   reportSheet.appendRow(headerRow);
 
   // ヘッダー書式
@@ -188,61 +207,107 @@ function generateShippingReport(yearMonth) {
 
   // 総合計用
   var grandTotal = {};
-  for (var p = 0; p < PRODUCT_ORDER.length; p++) {
-    grandTotal[PRODUCT_ORDER[p]] = 0;
+  for (var p = 0; p < numProducts; p++) {
+    grandTotal[productColumns[p]] = 0;
   }
   var grandTotalQty = 0;
+  var grandTotalAmount = 0;
 
-  // 日付×店舗ごとにデータ行を出力
+  // 店舗ごとにデータ行を出力
   for (var i = 0; i < rowOrder.length; i++) {
     var entry = rowMap[rowOrder[i]];
-    // 日付を月/日形式に変換
-    var dateParts = entry.date.split("-");
-    var dateDisplay = parseInt(dateParts[1]) + "/" + parseInt(dateParts[2]);
-    var row = [dateDisplay, entry.storeName];
-    var rowTotal = 0;
+    var row = [entry.storeName];
+    var rowTotalQty = 0;
+    var rowTotalAmount = 0;
 
-    for (var p = 0; p < PRODUCT_ORDER.length; p++) {
-      var pName = PRODUCT_ORDER[p];
+    for (var p = 0; p < numProducts; p++) {
+      var pName = productColumns[p];
       var qty = entry.products[pName] || 0;
       row.push(qty > 0 ? qty : "");
       grandTotal[pName] += qty;
-      rowTotal += qty;
+      rowTotalQty += qty;
+      rowTotalAmount += qty * (priceMap[pName] || 0);
     }
-    row.push(rowTotal);
-    grandTotalQty += rowTotal;
+    row.push(rowTotalQty);
+    row.push(rowTotalAmount);
+    grandTotalQty += rowTotalQty;
+    grandTotalAmount += rowTotalAmount;
     reportSheet.appendRow(row);
   }
 
-  // 総合計行
-  var totalRow = ["", "合計"];
-  for (var p = 0; p < PRODUCT_ORDER.length; p++) {
-    var qty = grandTotal[PRODUCT_ORDER[p]];
+  // 単価行: ["", "単価", 商品1の単価, 商品2の単価, ..., "", ""]
+  // ※ 1列目が空、2列目が"単価"なので、商品列は3列目から → ヘッダーは["店舗名", 商品...]
+  // 仕様に合わせて: ["", "単価", 単価1, 単価2, ..., "", ""]
+  // ただしヘッダーが["店舗名", 商品1, 商品2, ..., "合計数量", "合計金額"]なので
+  // 単価行の最初の要素は店舗名列に対応 → 仕様通り ""
+  // → しかし仕様では3要素目から単価が始まる = 2列目が"単価"ラベル
+  // ヘッダーは1列目=店舗名、2列目以降=商品名... なので
+  // 単価行: 1列目="単価", 2列目以降=各商品の単価, 最後2列="",""
+  var unitPriceRow = ["単価"];
+  for (var p = 0; p < numProducts; p++) {
+    unitPriceRow.push(priceMap[productColumns[p]] || 0);
+  }
+  unitPriceRow.push("");
+  unitPriceRow.push("");
+  reportSheet.appendRow(unitPriceRow);
+
+  // 商品別金額行: ["商品別金額", 商品1の合計金額, 商品2の合計金額, ..., "", 総合計金額]
+  var productAmountRow = ["商品別金額"];
+  for (var p = 0; p < numProducts; p++) {
+    var pName = productColumns[p];
+    var amt = grandTotal[pName] * (priceMap[pName] || 0);
+    productAmountRow.push(amt > 0 ? amt : "");
+  }
+  productAmountRow.push("");
+  productAmountRow.push(grandTotalAmount);
+  reportSheet.appendRow(productAmountRow);
+
+  // 合計行: ["合計", 商品1の合計数量, 商品2の合計数量, ..., 総合計数量, 総合計金額]
+  var totalRow = ["合計"];
+  for (var p = 0; p < numProducts; p++) {
+    var qty = grandTotal[productColumns[p]];
     totalRow.push(qty > 0 ? qty : "");
   }
   totalRow.push(grandTotalQty);
+  totalRow.push(grandTotalAmount);
   reportSheet.appendRow(totalRow);
 
-  // 総合計行の書式
+  // 書式設定
   var lastRowNum = reportSheet.getLastRow();
-  var totalRange = reportSheet.getRange(lastRowNum, 1, 1, headerRow.length);
+  var totalCols = headerRow.length;
+
+  // 合計行の書式（最終行）
+  var totalRange = reportSheet.getRange(lastRowNum, 1, 1, totalCols);
   totalRange.setBackground("#FFF3EE");
   totalRange.setFontWeight("bold");
 
+  // 単価行・商品別金額行の書式
+  var unitPriceRowNum = lastRowNum - 2;
+  var productAmountRowNum = lastRowNum - 1;
+  reportSheet.getRange(unitPriceRowNum, 1, 1, totalCols).setBackground("#F5F5F5").setFontWeight("bold");
+  reportSheet.getRange(productAmountRowNum, 1, 1, totalCols).setBackground("#F5F5F5").setFontWeight("bold");
+
+  // 金額列（合計金額列）を#,##0形式に設定
+  var amountColIndex = totalCols; // 最後の列が合計金額
+  reportSheet.getRange(2, amountColIndex, lastRowNum - 1, 1).setNumberFormat("#,##0");
+
+  // 商品別金額行の商品金額セルも#,##0形式
+  reportSheet.getRange(productAmountRowNum, 2, 1, numProducts).setNumberFormat("#,##0");
+
+  // 数量列を中央揃え（商品列＋合計数量列）
+  if (lastRowNum > 1) {
+    reportSheet.getRange(2, 2, lastRowNum - 1, numProducts + 1)
+      .setHorizontalAlignment("center");
+  }
+
   // 列幅自動調整
-  for (var c = 1; c <= headerRow.length; c++) {
+  for (var c = 1; c <= totalCols; c++) {
     reportSheet.autoResizeColumn(c);
   }
 
-  // 罫線
-  var allRange = reportSheet.getRange(1, 1, lastRowNum, headerRow.length);
+  // 全セルに罫線
+  var allRange = reportSheet.getRange(1, 1, lastRowNum, totalCols);
   allRange.setBorder(true, true, true, true, true, true);
-
-  // 数量列を中央揃え
-  if (lastRowNum > 1) {
-    reportSheet.getRange(2, 3, lastRowNum - 1, PRODUCT_ORDER.length + 1)
-      .setHorizontalAlignment("center");
-  }
 }
 
 // === テスト用関数 ===
