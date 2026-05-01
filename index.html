@@ -491,6 +491,7 @@ async function sendToSheet(delivery, store, pdfBase64) {
   if (!GAS_URL) return;
   try {
     var payload = {
+      uniqueId: delivery.id,
       date: delivery.date,
       storeName: store.name,
       address: store.address,
@@ -572,8 +573,32 @@ async function reprintPDF(deliveryId) {
   }
 }
 
-function deleteDelivery(deliveryId) {
+async function deleteDelivery(deliveryId) {
   if (!confirm('この履歴を削除しますか？')) return;
+
+  // GASへ削除リクエスト送信（text/plainでプリフライト回避）
+  try {
+    const response = await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: JSON.stringify({
+        action: 'delete',
+        uniqueId: deliveryId
+      })
+    });
+    const result = await response.json();
+    if (result.status !== 'ok') {
+      alert('スプレッドシートからの削除に失敗しました: ' + (result.message || '不明なエラー'));
+      return;
+    }
+    console.log('GAS削除結果:', result);
+  } catch (e) {
+    console.error('GAS削除エラー:', e);
+    alert('通信エラーで削除できませんでした: ' + e.message);
+    return;
+  }
+
+  // 成功時のみlocalStorageから削除
   const deliveries = getDeliveries().filter(d => d.id !== deliveryId);
   saveData('deliveries', deliveries);
   renderHistory();
