@@ -18,17 +18,53 @@ var PRODUCT_ORDER = [
 function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
+
+    // action分岐: 削除リクエスト
+    if (data.action === "delete") {
+      return deleteHistoryByUniqueId(data.uniqueId);
+    }
+
     var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
     var sheet = ss.getSheetByName(HISTORY_SHEET_NAME);
     if (!sheet) {
       sheet = ss.insertSheet(HISTORY_SHEET_NAME);
-      sheet.appendRow(["日付", "店舗名", "住所", "電話番号", "商品名", "数量", "単価", "金額"]);
+      sheet.appendRow(["uniqueID", "日付", "店舗名", "住所", "電話番号", "商品名", "数量", "単価", "金額"]);
+    }
+
+    // uniqueIDをフロントから受け取る（delivery.idを流用）。なければGAS側で生成
+    var uniqueId = data.uniqueId || Utilities.getUuid();
+
+    // 冪等性チェック: 既に同一uniqueIdが存在すれば追記しない（再出力時の重複防止）
+    var lastRow = sheet.getLastRow();
+    if (lastRow >= 2) {
+      var existingIds = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      var alreadyExists = existingIds.some(function(r) { return r[0] === uniqueId; });
+      if (alreadyExists) {
+        var driveStatusSkip = "skipped";
+        if (data.pdfBase64 && DRIVE_FOLDER_ID) {
+          try {
+            var pdfBlobSkip = Utilities.newBlob(
+              Utilities.base64Decode(data.pdfBase64),
+              "application/pdf",
+              "納品書_" + data.storeName + "_" + data.date + "_" + uniqueId.substring(0, 8) + "_reprint.pdf"
+            );
+            DriveApp.getFolderById(DRIVE_FOLDER_ID).createFile(pdfBlobSkip);
+            driveStatusSkip = "ok";
+          } catch (driveErr) {
+            driveStatusSkip = "error: " + driveErr.message;
+          }
+        }
+        return ContentService
+          .createTextOutput(JSON.stringify({ status: "ok", skipped: true, uniqueId: uniqueId, drive: driveStatusSkip }))
+          .setMimeType(ContentService.MimeType.JSON);
+      }
     }
 
     var items = data.items || [];
     for (var i = 0; i < items.length; i++) {
       var item = items[i];
       sheet.appendRow([
+        uniqueId,
         data.date,
         data.storeName,
         data.address || "",
@@ -47,7 +83,7 @@ function doPost(e) {
         var pdfBlob = Utilities.newBlob(
           Utilities.base64Decode(data.pdfBase64),
           "application/pdf",
-          "納品書_" + data.storeName + "_" + data.date + ".pdf"
+          "納品書_" + data.storeName + "_" + data.date + "_" + uniqueId.substring(0, 8) + ".pdf"
         );
         var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
         folder.createFile(pdfBlob);
@@ -58,13 +94,52 @@ function doPost(e) {
     }
 
     return ContentService
-      .createTextOutput(JSON.stringify({ status: "ok", drive: driveStatus }))
+      .createTextOutput(JSON.stringify({ status: "ok", uniqueId: uniqueId, drive: driveStatus }))
       .setMimeType(ContentService.MimeType.JSON);
   } catch (err) {
     return ContentService
       .createTextOutput(JSON.stringify({ status: "error", message: err.message }))
       .setMimeType(ContentService.MimeType.JSON);
   }
+}
+
+// === uniqueIDで履歴を削除 ===
+function deleteHistoryByUniqueId(uniqueId) {
+  if (!uniqueId) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: "error", message: "uniqueId is required" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = ss.getSheetByName(HISTORY_SHEET_NAME);
+  if (!sheet) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: "error", message: "シートが見つかりません" }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ status: "ok", deleted: 0 }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  var ids = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  var deleteCount = 0;
+
+  // 下から削除（行番号がずれないように）
+  for (var i = ids.length - 1; i >= 0; i--) {
+    if (ids[i][0] === uniqueId) {
+      sheet.deleteRow(i + 2);
+      deleteCount++;
+    }
+  }
+
+  return ContentService
+    .createTextOutput(JSON.stringify({ status: "ok", deleted: deleteCount }))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 // === メニュー追加 ===
@@ -111,22 +186,23 @@ function generateShippingReport(yearMonth) {
     SpreadsheetApp.getUi().alert("エラー", "出荷履歴データがありません。", SpreadsheetApp.getUi().ButtonSet.OK);
     return;
   }
-  var data = historySheet.getRange(2, 1, lastRow - 1, 8).getValues();
+  // uniqueID列追加に伴い9列に拡張（row[0]=uniqueID）
+  var data = historySheet.getRange(2, 1, lastRow - 1, 9).getValues();
 
   // 該当月のデータを抽出
   var filtered = [];
   for (var i = 0; i < data.length; i++) {
     var row = data[i];
-    var dateVal = row[0].toString();
-    if (row[0] instanceof Date) {
-      dateVal = Utilities.formatDate(row[0], Session.getScriptTimeZone(), "yyyy-MM-dd");
+    var dateVal = row[1].toString();
+    if (row[1] instanceof Date) {
+      dateVal = Utilities.formatDate(row[1], Session.getScriptTimeZone(), "yyyy-MM-dd");
     }
     if (dateVal.substring(0, 7) === yearMonth) {
       filtered.push({
-        storeName: row[1].toString(),
-        productName: row[4].toString(),
-        qty: Number(row[5]) || 0,
-        price: Number(row[6]) || 0
+        storeName: row[2].toString(),
+        productName: row[5].toString(),
+        qty: Number(row[6]) || 0,
+        price: Number(row[7]) || 0
       });
     }
   }
@@ -137,13 +213,17 @@ function generateShippingReport(yearMonth) {
   }
 
   // 商品列を動的に取得（PRODUCT_ORDERを優先順として使い、残りを後ろに追加）
+  // priceMap: { 商品名: [登場した全単価の配列] } — 月内で複数単価が出るケースに対応
   var productSet = {};
   var priceMap = {};
   for (var i = 0; i < filtered.length; i++) {
     var r = filtered[i];
     productSet[r.productName] = true;
-    if (priceMap[r.productName] === undefined) {
-      priceMap[r.productName] = r.price;
+    if (!priceMap[r.productName]) {
+      priceMap[r.productName] = [];
+    }
+    if (priceMap[r.productName].indexOf(r.price) === -1) {
+      priceMap[r.productName].push(r.price);
     }
   }
   var productColumns = [];
@@ -158,7 +238,7 @@ function generateShippingReport(yearMonth) {
     }
   }
 
-  // 店舗ごとに数量を集計（日付は無視）
+  // 店舗ごとに数量と金額を集計（金額は実単価ベースで積み上げる）
   var rowMap = {};
   var rowOrder = [];
   for (var i = 0; i < filtered.length; i++) {
@@ -169,9 +249,10 @@ function generateShippingReport(yearMonth) {
       rowOrder.push(key);
     }
     if (!rowMap[key].products[r.productName]) {
-      rowMap[key].products[r.productName] = 0;
+      rowMap[key].products[r.productName] = { qty: 0, amount: 0 };
     }
-    rowMap[key].products[r.productName] += r.qty;
+    rowMap[key].products[r.productName].qty += r.qty;
+    rowMap[key].products[r.productName].amount += r.qty * r.price;
   }
 
   // 店舗名順にソート
@@ -205,15 +286,17 @@ function generateShippingReport(yearMonth) {
   headerRange.setFontWeight("bold");
   headerRange.setHorizontalAlignment("center");
 
-  // 総合計用
-  var grandTotal = {};
+  // 総合計用（数量と金額を別々に集計）
+  var grandTotalQtyByProduct = {};
+  var grandTotalAmountByProduct = {};
   for (var p = 0; p < numProducts; p++) {
-    grandTotal[productColumns[p]] = 0;
+    grandTotalQtyByProduct[productColumns[p]] = 0;
+    grandTotalAmountByProduct[productColumns[p]] = 0;
   }
   var grandTotalQty = 0;
   var grandTotalAmount = 0;
 
-  // 店舗ごとにデータ行を出力
+  // 店舗ごとにデータ行を出力（金額は実単価ベースの実額をそのまま使う）
   for (var i = 0; i < rowOrder.length; i++) {
     var entry = rowMap[rowOrder[i]];
     var row = [entry.storeName];
@@ -222,11 +305,15 @@ function generateShippingReport(yearMonth) {
 
     for (var p = 0; p < numProducts; p++) {
       var pName = productColumns[p];
-      var qty = entry.products[pName] || 0;
+      var prod = entry.products[pName] || { qty: 0, amount: 0 };
+      var qty = prod.qty;
+      var amount = prod.amount;
+
       row.push(qty > 0 ? qty : "");
-      grandTotal[pName] += qty;
+      grandTotalQtyByProduct[pName] += qty;
+      grandTotalAmountByProduct[pName] += amount;
       rowTotalQty += qty;
-      rowTotalAmount += qty * (priceMap[pName] || 0);
+      rowTotalAmount += amount;
     }
     row.push(rowTotalQty);
     row.push(rowTotalAmount);
@@ -235,37 +322,32 @@ function generateShippingReport(yearMonth) {
     reportSheet.appendRow(row);
   }
 
-  // 単価行: ["", "単価", 商品1の単価, 商品2の単価, ..., "", ""]
-  // ※ 1列目が空、2列目が"単価"なので、商品列は3列目から → ヘッダーは["店舗名", 商品...]
-  // 仕様に合わせて: ["", "単価", 単価1, 単価2, ..., "", ""]
-  // ただしヘッダーが["店舗名", 商品1, 商品2, ..., "合計数量", "合計金額"]なので
-  // 単価行の最初の要素は店舗名列に対応 → 仕様通り ""
-  // → しかし仕様では3要素目から単価が始まる = 2列目が"単価"ラベル
-  // ヘッダーは1列目=店舗名、2列目以降=商品名... なので
-  // 単価行: 1列目="単価", 2列目以降=各商品の単価, 最後2列="",""
+  // 単価行: 1列目="単価"、2列目以降=各商品の単価（複数あれば昇順スラッシュ併記）、最後2列=""
   var unitPriceRow = ["単価"];
   for (var p = 0; p < numProducts; p++) {
-    unitPriceRow.push(priceMap[productColumns[p]] || 0);
+    var prices = priceMap[productColumns[p]] || [];
+    prices.sort(function(a, b) { return a - b; });
+    unitPriceRow.push(prices.length > 0 ? prices.join("/") : 0);
   }
   unitPriceRow.push("");
   unitPriceRow.push("");
   reportSheet.appendRow(unitPriceRow);
 
-  // 商品別金額行: ["商品別金額", 商品1の合計金額, 商品2の合計金額, ..., "", 総合計金額]
+  // 商品別金額行: 実集計値をそのまま使う（priceMapで再計算しない）
   var productAmountRow = ["商品別金額"];
   for (var p = 0; p < numProducts; p++) {
     var pName = productColumns[p];
-    var amt = grandTotal[pName] * (priceMap[pName] || 0);
+    var amt = grandTotalAmountByProduct[pName];
     productAmountRow.push(amt > 0 ? amt : "");
   }
   productAmountRow.push("");
   productAmountRow.push(grandTotalAmount);
   reportSheet.appendRow(productAmountRow);
 
-  // 合計行: ["合計", 商品1の合計数量, 商品2の合計数量, ..., 総合計数量, 総合計金額]
+  // 合計行: ["合計", 商品1の合計数量, ..., 総合計数量, 総合計金額]
   var totalRow = ["合計"];
   for (var p = 0; p < numProducts; p++) {
-    var qty = grandTotal[productColumns[p]];
+    var qty = grandTotalQtyByProduct[productColumns[p]];
     totalRow.push(qty > 0 ? qty : "");
   }
   totalRow.push(grandTotalQty);
@@ -315,4 +397,28 @@ function testDriveSave() {
   var folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
   var file = folder.createFile('test.txt', 'テスト保存', MimeType.PLAIN_TEXT);
   Logger.log('保存成功: ' + file.getName());
+}
+
+// === バックフィル関数（既存データのuniqueID列を埋める / 1回限り実行）===
+// 検証環境で動作確認後、本番でも1回だけ手動実行する
+function backfillUniqueIds() {
+  var sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(HISTORY_SHEET_NAME);
+  if (!sheet) {
+    Logger.log("シートが見つかりません");
+    return;
+  }
+  var n = sheet.getLastRow() - 1;
+  if (n < 1) {
+    Logger.log("バックフィル対象なし");
+    return;
+  }
+  var ids = sheet.getRange(2, 1, n, 1).getValues();
+  var filledCount = 0;
+  for (var i = 0; i < n; i++) {
+    if (!ids[i][0]) {
+      sheet.getRange(i + 2, 1).setValue("legacy-" + Utilities.getUuid());
+      filledCount++;
+    }
+  }
+  Logger.log("バックフィル完了: " + filledCount + " 行");
 }
