@@ -147,6 +147,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu("出荷管理")
     .addItem("出荷表を生成", "showMonthDialog")
+    .addItem("利益計算表を生成", "showProfitMonthDialog")
     .addToUi();
 }
 
@@ -421,4 +422,312 @@ function backfillUniqueIds() {
     }
   }
   Logger.log("バックフィル完了: " + filledCount + " 行");
+}
+
+// === 原価マスター読み込み ===
+function loadCostMap() {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var costSheet = ss.getSheetByName("原価マスター");
+
+  if (!costSheet) {
+    // 原価マスターシートが存在しない場合は新規作成（ヘッダーのみ）
+    costSheet = ss.insertSheet("原価マスター");
+    costSheet.appendRow(["商品名", "原価"]);
+
+    // PRODUCT_ORDER の商品を初期登録（原価は空欄）
+    for (var i = 0; i < PRODUCT_ORDER.length; i++) {
+      costSheet.appendRow([PRODUCT_ORDER[i], ""]);
+    }
+
+    // ヘッダー書式
+    var headerRange = costSheet.getRange(1, 1, 1, 2);
+    headerRange.setBackground("#FF6B35").setFontColor("#FFFFFF").setFontWeight("bold");
+  }
+
+  var lastRow = costSheet.getLastRow();
+  var costMap = {};
+  if (lastRow >= 2) {
+    var data = costSheet.getRange(2, 1, lastRow - 1, 2).getValues();
+    for (var i = 0; i < data.length; i++) {
+      var productName = data[i][0] ? data[i][0].toString() : "";
+      var cost = Number(data[i][1]) || 0;
+      if (productName) {
+        costMap[productName] = cost;
+      }
+    }
+  }
+  return costMap;
+}
+
+// === 利益計算表 年月入力ダイアログ ===
+function showProfitMonthDialog() {
+  var ui = SpreadsheetApp.getUi();
+  var result = ui.prompt(
+    "利益計算表を生成",
+    "対象年月を入力してください（例：2026-04）",
+    ui.ButtonSet.OK_CANCEL
+  );
+
+  if (result.getSelectedButton() !== ui.Button.OK) return;
+
+  var input = result.getResponseText().trim();
+  if (!/^\d{4}-\d{2}$/.test(input)) {
+    ui.alert("エラー", "「YYYY-MM」の形式で入力してください（例：2026-04）", ui.ButtonSet.OK);
+    return;
+  }
+
+  generateProfitReport(input);
+  ui.alert("完了", input.replace("-", "年") + "月の利益計算表を生成しました。", ui.ButtonSet.OK);
+}
+
+// === 利益計算表生成 ===
+function generateProfitReport(yearMonth) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var historySheet = ss.getSheetByName(HISTORY_SHEET_NAME);
+  if (!historySheet) {
+    SpreadsheetApp.getUi().alert("エラー", "「出荷履歴」シートが見つかりません。", SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+
+  // 原価マスターを読み込み
+  var costMap = loadCostMap();
+
+  // 履歴データ取得
+  var lastRow = historySheet.getLastRow();
+  if (lastRow < 2) {
+    SpreadsheetApp.getUi().alert("エラー", "出荷履歴データがありません。", SpreadsheetApp.getUi().ButtonSet.OK);
+    return;
+  }
+  var data = historySheet.getRange(2, 1, lastRow - 1, 9).getValues();
+
+  // 該当月のデータを抽出
+  var filtered = [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i];
+    var dateVal = row[1].toString();
+    if (row[1] instanceof Date) {
+      dateVal = Utilities.formatDate(row[1], Session.getScriptTimeZone(), "yyyy-MM-dd");
+    }
+    if (dateVal.substring(0, 7) === yearMonth) {
+      filtered.push({
+        storeName: row[2].toString(),
+        productName: row[5].toString(),
+        qty: Number(row[6]) || 0,
+        price: Number(row[7]) || 0
+      });
+    }
+  }
+
+  if (filtered.length === 0) {
+    SpreadsheetApp.getUi().alert("該当月のデータがありません。");
+    return;
+  }
+
+  // 商品列の動的取得（出荷表と同じロジック）
+  var productSet = {};
+  for (var i = 0; i < filtered.length; i++) {
+    productSet[filtered[i].productName] = true;
+  }
+  var productColumns = [];
+  for (var p = 0; p < PRODUCT_ORDER.length; p++) {
+    if (productSet[PRODUCT_ORDER[p]]) {
+      productColumns.push(PRODUCT_ORDER[p]);
+    }
+  }
+  for (var name in productSet) {
+    if (productColumns.indexOf(name) === -1) {
+      productColumns.push(name);
+    }
+  }
+
+  // 店舗ごとに集計（数量・売上・原価金額）
+  var rowMap = {};
+  var rowOrder = [];
+  for (var i = 0; i < filtered.length; i++) {
+    var r = filtered[i];
+    var key = r.storeName;
+    if (!rowMap[key]) {
+      rowMap[key] = { storeName: r.storeName, products: {} };
+      rowOrder.push(key);
+    }
+    if (!rowMap[key].products[r.productName]) {
+      rowMap[key].products[r.productName] = { qty: 0, salesAmount: 0 };
+    }
+    rowMap[key].products[r.productName].qty += r.qty;
+    rowMap[key].products[r.productName].salesAmount += r.qty * r.price;
+  }
+
+  rowOrder.sort();
+
+  // 利益計算表シート作成（既存なら上書き）
+  var parts = yearMonth.split("-");
+  var sheetName = parts[0] + "年" + parts[1] + "月_利益計算表";
+  var reportSheet = ss.getSheetByName(sheetName);
+  if (reportSheet) {
+    reportSheet.clear();
+  } else {
+    reportSheet = ss.insertSheet(sheetName);
+  }
+
+  var numProducts = productColumns.length;
+
+  // ヘッダー行: ["店舗名", 商品名..., "合計数量", "合計原価"]
+  var headerRow = ["店舗名"];
+  for (var p = 0; p < numProducts; p++) {
+    headerRow.push(productColumns[p]);
+  }
+  headerRow.push("合計数量");
+  headerRow.push("合計原価");
+  reportSheet.appendRow(headerRow);
+
+  var headerRange = reportSheet.getRange(1, 1, 1, headerRow.length);
+  headerRange.setBackground("#FF6B35").setFontColor("#FFFFFF").setFontWeight("bold").setHorizontalAlignment("center");
+
+  // 商品別総合計
+  var grandTotalQtyByProduct = {};
+  var grandTotalCostByProduct = {};
+  for (var p = 0; p < numProducts; p++) {
+    grandTotalQtyByProduct[productColumns[p]] = 0;
+    grandTotalCostByProduct[productColumns[p]] = 0;
+  }
+  var grandTotalQty = 0;
+  var grandTotalSales = 0;
+  var grandTotalCost = 0;
+
+  // 店舗ごとに行を出力（原価ベース）
+  for (var i = 0; i < rowOrder.length; i++) {
+    var entry = rowMap[rowOrder[i]];
+    var row = [entry.storeName];
+    var rowTotalQty = 0;
+    var rowTotalCost = 0;
+
+    for (var p = 0; p < numProducts; p++) {
+      var pName = productColumns[p];
+      var prod = entry.products[pName] || { qty: 0, salesAmount: 0 };
+      var qty = prod.qty;
+      var unitCost = costMap[pName] || 0;
+      var rowProductCost = qty * unitCost;
+
+      row.push(qty > 0 ? qty : "");
+      grandTotalQtyByProduct[pName] += qty;
+      grandTotalCostByProduct[pName] += rowProductCost;
+      rowTotalQty += qty;
+      rowTotalCost += rowProductCost;
+      grandTotalSales += prod.salesAmount;
+    }
+    row.push(rowTotalQty);
+    row.push(rowTotalCost);
+    grandTotalQty += rowTotalQty;
+    grandTotalCost += rowTotalCost;
+    reportSheet.appendRow(row);
+  }
+
+  // 原価行
+  var costRow = ["原価"];
+  for (var p = 0; p < numProducts; p++) {
+    var unitCost = costMap[productColumns[p]] || 0;
+    costRow.push(unitCost > 0 ? unitCost : "");
+  }
+  costRow.push("");
+  costRow.push("");
+  reportSheet.appendRow(costRow);
+
+  // 商品別原価行
+  var productCostRow = ["商品別原価"];
+  for (var p = 0; p < numProducts; p++) {
+    var pName = productColumns[p];
+    var amt = grandTotalCostByProduct[pName];
+    productCostRow.push(amt > 0 ? amt : "");
+  }
+  productCostRow.push("");
+  productCostRow.push(grandTotalCost);
+  reportSheet.appendRow(productCostRow);
+
+  // 合計行
+  var totalRow = ["合計"];
+  for (var p = 0; p < numProducts; p++) {
+    var qty = grandTotalQtyByProduct[productColumns[p]];
+    totalRow.push(qty > 0 ? qty : "");
+  }
+  totalRow.push(grandTotalQty);
+  totalRow.push(grandTotalCost);
+  reportSheet.appendRow(totalRow);
+
+  // ===== 利益サマリ部分 =====
+  reportSheet.appendRow([""]);
+
+  var salesRow = ["売上合計"];
+  for (var p = 0; p < numProducts; p++) salesRow.push("");
+  salesRow.push("");
+  salesRow.push(grandTotalSales);
+  reportSheet.appendRow(salesRow);
+
+  var costSummaryRow = ["原価合計"];
+  for (var p = 0; p < numProducts; p++) costSummaryRow.push("");
+  costSummaryRow.push("");
+  costSummaryRow.push(grandTotalCost);
+  reportSheet.appendRow(costSummaryRow);
+
+  var profit = grandTotalSales - grandTotalCost;
+  var profitRow = ["利益"];
+  for (var p = 0; p < numProducts; p++) profitRow.push("");
+  profitRow.push("");
+  profitRow.push(profit);
+  reportSheet.appendRow(profitRow);
+
+  var profitRate = grandTotalSales > 0 ? (profit / grandTotalSales) : 0;
+  var profitRateRow = ["利益率"];
+  for (var p = 0; p < numProducts; p++) profitRateRow.push("");
+  profitRateRow.push("");
+  profitRateRow.push(profitRate);
+  reportSheet.appendRow(profitRateRow);
+
+  // ===== 書式設定 =====
+  var lastRowNum = reportSheet.getLastRow();
+  var totalCols = headerRow.length;
+
+  var profitRateRowNum = lastRowNum;
+  var profitRowNum = lastRowNum - 1;
+  var costSummaryRowNum = lastRowNum - 2;
+  var salesRowNum = lastRowNum - 3;
+  var totalRowNumProfit = lastRowNum - 5;
+  var productCostRowNum = lastRowNum - 6;
+  var costRowNum = lastRowNum - 7;
+
+  reportSheet.getRange(totalRowNumProfit, 1, 1, totalCols).setBackground("#FFF3EE").setFontWeight("bold");
+  reportSheet.getRange(costRowNum, 1, 1, totalCols).setBackground("#F5F5F5").setFontWeight("bold");
+  reportSheet.getRange(productCostRowNum, 1, 1, totalCols).setBackground("#F5F5F5").setFontWeight("bold");
+
+  reportSheet.getRange(salesRowNum, 1, 1, totalCols).setBackground("#EAF3DE").setFontWeight("bold");
+  reportSheet.getRange(costSummaryRowNum, 1, 1, totalCols).setBackground("#EAF3DE").setFontWeight("bold");
+  reportSheet.getRange(profitRowNum, 1, 1, totalCols).setBackground("#EAF3DE").setFontWeight("bold");
+  reportSheet.getRange(profitRateRowNum, 1, 1, totalCols).setBackground("#E1F5EE").setFontWeight("bold");
+
+  // 数値書式
+  var costColIndex = totalCols;
+  reportSheet.getRange(2, costColIndex, totalRowNumProfit - 1, 1).setNumberFormat("#,##0");
+  reportSheet.getRange(productCostRowNum, 2, 1, numProducts).setNumberFormat("#,##0");
+
+  reportSheet.getRange(salesRowNum, costColIndex).setNumberFormat("#,##0");
+  reportSheet.getRange(costSummaryRowNum, costColIndex).setNumberFormat("#,##0");
+  reportSheet.getRange(profitRowNum, costColIndex).setNumberFormat("#,##0");
+  reportSheet.getRange(profitRateRowNum, costColIndex).setNumberFormat("0.0%");
+
+  // 数量列を中央揃え
+  if (totalRowNumProfit > 1) {
+    reportSheet.getRange(2, 2, totalRowNumProfit - 1, numProducts + 1).setHorizontalAlignment("center");
+  }
+
+  // 列幅自動調整
+  for (var c = 1; c <= totalCols; c++) {
+    reportSheet.autoResizeColumn(c);
+  }
+
+  // 罫線（店舗データ部分）
+  var dataRange = reportSheet.getRange(1, 1, totalRowNumProfit, totalCols);
+  dataRange.setBorder(true, true, true, true, true, true);
+
+  // 利益サマリ部分の罫線
+  var summaryRange = reportSheet.getRange(salesRowNum, 1, 4, totalCols);
+  summaryRange.setBorder(true, true, true, true, true, true);
 }
