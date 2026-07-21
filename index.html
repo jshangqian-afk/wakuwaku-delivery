@@ -81,8 +81,8 @@ h3 { font-size: 18px; margin: 16px 0 10px; color: #555; }
 
 /* PDF preview (hidden) */
 #pdf-container { position: fixed; left: 0; top: 0; z-index: -1; opacity: 0; pointer-events: none; }
-.pdf-page { width: 794px; height: 1123px; background: #fff; padding: 0; font-family: 'Yu Mincho', 'Hiragino Mincho ProN', serif; position: relative; }
-.slip { height: 550px; padding: 30px 40px 30px; position: relative; border-bottom: 1px dashed #999; }
+.pdf-page { width: 794px; min-height: 1123px; background: #fff; padding: 0; font-family: 'Yu Mincho', 'Hiragino Mincho ProN', serif; position: relative; }
+.slip { min-height: 550px; padding: 30px 40px 30px; position: relative; border-bottom: 1px dashed #999; }
 .slip-copy { border-bottom: none; }
 .slip-title { text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 1em; margin-bottom: 8px; }
 .slip-copy-label { text-align: center; font-size: 14px; margin-bottom: 4px; }
@@ -460,15 +460,24 @@ async function renderAndDownloadPDF(store, delivery, isReprint, staffName) {
       useCORS: true,
       backgroundColor: '#ffffff',
       logging: true,
-      windowWidth: 794,
-      windowHeight: 1123
+      windowWidth: 794
     });
     console.log('html2canvas キャプチャ完了:', canvas.width, 'x', canvas.height);
 
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const imgData = canvas.toDataURL('image/png');
-    pdf.addImage(imgData, 'PNG', 0, 0, 210, 297);
+    // A4サイズに収まるよう縦横比を保って縮小（商品が増えても文言が切れないように）
+    const pageW = 210, pageH = 297;
+    let imgW = pageW;
+    let imgH = canvas.height * pageW / canvas.width;
+    let offsetX = 0;
+    if (imgH > pageH) {
+      imgH = pageH;
+      imgW = canvas.width * pageH / canvas.height;
+      offsetX = (pageW - imgW) / 2;
+    }
+    pdf.addImage(imgData, 'PNG', offsetX, 0, imgW, imgH);
 
     const fileName = '納品書_' + delivery.storeName + '_' + delivery.date + '.pdf';
     pdf.save(fileName);
